@@ -173,6 +173,7 @@ button{font:inherit;color:inherit;cursor:pointer}
 .btn{min-height:52px;padding:0 18px;border-radius:14px;border:1px solid var(--line);background:var(--surface);
   font-weight:600;width:100%}
 .btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn.exp{font-weight:800}
 .btn.danger{color:var(--danger);border-color:var(--danger)}
 .btn.ghost{border-color:transparent;background:transparent;color:var(--muted)}
 .btn:disabled{opacity:.35;cursor:default}
@@ -458,7 +459,7 @@ body.cols-grid.grid-vert:not(.sortmode) .rowflow{display:grid;grid-auto-flow:col
 
 /* ---------- утилиты ---------- */
 const KEY = 'my-templates-v1';
-const APP_VERSION = '2026-10-29.1';
+const APP_VERSION = '2026-10-29.2';
 const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4);
 const $ = s => document.querySelector(s);
 
@@ -2956,7 +2957,7 @@ function menuSheet() {
         btn('Настройки вкладок', () => { api.close(); tabsSheet(); }),
         btn('Оформление и размеры…', () => { api.close(); uiSheet(); }),
         btn('Корзина' + (state.trash.length ? ' (' + state.trash.length + ')' : ''), () => { api.close(); trashSheet(); }),
-        btn('Экспорт (сохранить копию в файл)', () => { api.close(); exportData(); }),
+        btn('Экспорт (сохранить копию в файл)', () => { api.close(); exportData(); }, 'primary exp'),
         btn('Импорт (загрузить из файла)', () => { api.close(); $('#file').click(); }),
         btn('Проверить обновление', () => { api.close(); checkUpdate(); }),
         btn(more ? 'Меньше ▴' : 'Ещё… ▾', () => { more = !more; draw(); }),
