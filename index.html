@@ -369,6 +369,10 @@ body.pv-nowrap .sheet textarea.area{white-space:pre;overflow-wrap:normal;overflo
 .linkbtn{background:none;border:0;padding:0 4px;min-height:32px;color:var(--muted);font-size:13px;text-decoration:underline;cursor:pointer}
 /* кнопка со списком вкладок */
 .tjump{width:34px;font-size:15px}
+#syncBtn{position:relative;border-radius:50%;margin:0 9px}
+#syncBtn::before,#syncBtn::after{content:'';position:absolute;top:6px;bottom:6px;width:2px;border-radius:1px;background:var(--line)}
+#syncBtn::before{left:-8px}
+#syncBtn::after{right:-8px}
 #syncBtn svg{width:22px;height:22px;fill:currentColor}
 @keyframes spinr{to{transform:rotate(360deg)}}
 #syncBtn.spin svg{animation:spinr 1s linear infinite}
@@ -463,7 +467,7 @@ body.cols-grid.grid-vert:not(.sortmode) .rowflow{display:grid;grid-auto-flow:col
 
 /* ---------- утилиты ---------- */
 const KEY = 'my-templates-v1';
-const APP_VERSION = '2026-10-30.1';
+const APP_VERSION = '2026-10-30.2';
 const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4);
 const $ = s => document.querySelector(s);
 
@@ -2955,20 +2959,23 @@ $('#file').addEventListener('change', async e => {
 
 function menuSheet() {
   const bk = readBackup(), meta = readMeta();
-  let more = false;
+  let more = false, gh2 = false;
   openModal((box, api) => {
     const draw = () => box.replaceChildren(h('h2', { text: 'Меню' }),
       h('div', { class: 'btns' },
         curTab() ? btn('Выбрать несколько (массовые действия)', () => { api.close(); enterSelect(); }) : null,
         curTab() && !state.special ? btn('+ Новая группа в этой вкладке', () => { api.close(); newGroup(); }) : null,
-        syncCfg() ? btn('⟳ Синхронизировать', () => { api.close(); syncNow(); }, 'primary') : null,
         btn('Настройки вкладок', () => { api.close(); tabsSheet(); }),
         btn('Оформление и размеры…', () => { api.close(); uiSheet(); }),
         btn('Корзина' + (state.trash.length ? ' (' + state.trash.length + ')' : ''), () => { api.close(); trashSheet(); }),
         btn('Экспорт (сохранить копию в файл)', () => { api.close(); exportData(); }, 'primary exp'),
         btn('Импорт (загрузить из файла)', () => { api.close(); $('#file').click(); }),
-        btn('Синхронизация через GitHub…', () => { api.close(); syncSettings(); }),
-        btn('Проверить обновление', () => { api.close(); checkUpdate(); }),
+        btn((gh2 ? '▾' : '▸') + ' GitHub: синхронизация и обновление', () => { gh2 = !gh2; draw(); }),
+        ...(gh2 ? [
+          syncCfg() ? btn('⟳ Синхронизировать', () => { api.close(); syncNow(); }) : null,
+          btn('Настройка синхронизации…', () => { api.close(); syncSettings(); }),
+          btn('Проверить обновление приложения', () => { api.close(); checkUpdate(); })
+        ] : []),
         btn(more ? 'Меньше ▴' : 'Ещё… ▾', () => { more = !more; draw(); }),
         ...(more ? [
           bk ? btn('Вернуть данные, как были ' + fmtDateTime(bk.ts) + ' (' + bk.reason + ')', () => { api.close(); restoreBackup(); }) : null,
