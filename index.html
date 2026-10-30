@@ -469,7 +469,7 @@ body.cols-grid.grid-vert:not(.sortmode) .rowflow{display:grid;grid-auto-flow:col
 
 /* ---------- утилиты ---------- */
 const KEY = 'my-templates-v1';
-const APP_VERSION = '2026-10-30.4';
+const APP_VERSION = '2026-10-30.5';
 const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4);
 const $ = s => document.querySelector(s);
 
@@ -2977,6 +2977,7 @@ function menuSheet() {
         ...(gh2 ? [
           syncCfg() ? btn('⟳ Синхронизировать', () => { api.close(); syncNow(); }) : null,
           btn('Настройка синхронизации…', () => { api.close(); syncSettings(); }),
+          btn('Убрать точные копии «(другая версия)»', () => { api.close(); cleanConflictCopies(); }),
           btn('Проверить обновление приложения', () => { api.close(); checkUpdate(); })
         ] : []),
         btn(more ? 'Меньше ▴' : 'Ещё… ▾', () => { more = !more; draw(); }),
@@ -3738,6 +3739,7 @@ function mergeList(Lm, Rm, tomb, kn, now) {
       F[id] = l; Rm[id] = toR(l); delete tomb[id]; changed++; continue;
     }
     if (l.sm === r.m) { F[id] = l; continue; }
+    if (entHash(l) === entHash(fromR(r))) { F[id] = { ...l, sm: r.m }; continue; }
     if (l.sm > r.m) { F[id] = l; Rm[id] = toR(l); } else F[id] = { ...fromR(r), id };
     changed++;
   }
@@ -3791,6 +3793,7 @@ async function syncOnce(cfg, onProgress) {
       F.i[id] = l; R.items[id] = toR(l); delete R.purged[id]; kn.i[id] = l.sm; up++; prog(); continue;
     }
     if (l.sm === r.m) { F.i[id] = l; kn.i[id] = l.sm; continue; }
+    if (entHash(l) === entHash(fromR(r))) { F.i[id] = { ...l, sm: r.m }; kn.i[id] = r.m; continue; }     // содержимое одинаковое: просто принимаем метку из репозитория
     const lc = l.sm !== b, rc = r.m !== b;
     if (lc && !rc) { F.i[id] = l; R.items[id] = toR(l); kn.i[id] = l.sm; up++; prog(); continue; }
     if (rc && !lc) { F.i[id] = { ...fromR(r), id }; kn.i[id] = r.m; down++; prog(); continue; }
@@ -3850,6 +3853,31 @@ async function syncOnce(cfg, onProgress) {
   return { up, down, del, conf, lists: mt.changed + mg.changed };
 }
 
+const COPY_SUFFIX = '(другая версия)';
+// Точные копии «(другая версия)»: такой же текст и такое же название (без пометки), в той же вкладке и группе, что и у оригинала
+function findConflictCopies() {
+  const out = [];
+  state.tabs.forEach(tab => tab.items.forEach(it => {
+    const m = it.title.match(/^(.*?)\s*\(другая версия\)$/);
+    if (!m) return;
+    const base = m[1];
+    if (tab.items.some(o => o !== it && o.title === base && o.text === it.text && (o.group || null) === (it.group || null))) out.push({ tab, it });
+  }));
+  return out;
+}
+async function cleanConflictCopies() {
+  const list = findConflictCopies();
+  if (!list.length) { await syncInfo('Копий нет', 'Точных копий с пометкой «' + COPY_SUFFIX + '» не найдено.'); return; }
+  const ok = await confirmDialog({
+    title: 'Убрать точные копии?',
+    message: 'Найдено копий с пометкой «' + COPY_SUFFIX + '», полностью совпадающих с оригиналом: ' + list.length + '. Они будут перемещены в корзину (оригиналы остаются). Копии, где текст отличается, не трогаются.',
+    buttons: [{ label: 'Убрать ' + list.length, value: true, kind: 'primary' }, { label: 'Отмена', value: false }], cancelValue: false
+  });
+  if (!ok) return;
+  const snap = snapshot();
+  list.forEach(({ tab, it }) => trashItemNow(tab, it));
+  save(); renderTabs(); renderList(); toastUndo('Убрано копий: ' + list.length, snap);
+}
 let syncing = false;
 function syncBusy(on, text) {
   const b = document.getElementById('syncBtn'); if (b) b.classList.toggle('spin', !!on);

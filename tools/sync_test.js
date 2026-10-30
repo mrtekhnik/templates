@@ -159,6 +159,38 @@ const empty = () => ({ active: null, trash: [], tabs: [] });
     ok(same(a, c), 'данные из index.json восстановлены полностью (структура, порядок, вложенная группа, строка)');
   });
 
+
+  await run('9. оба устройства уже имели одинаковые данные (одинаковые id), первая синхронизация обоих', async br => {
+    const A = await newDev(br, 'A', baseA()), B = await newDev(br, 'B', baseA());
+    console.log('A:', await sync(A));
+    const msgB = await sync(B); console.log('B:', msgB.replace(/\n/g, ' '));
+    const b = await getSt(B);
+    ok(!/Конфликт/.test(msgB), 'нет конфликтов');
+    ok(!b.tabs.some(t => t.items.some(i => /другая версия/.test(i.title))), 'нет копий «(другая версия)»');
+    ok(b.tabs[0].items.length === 4 && b.tabs.length === 2, 'данные не задвоились');
+    ok(/Всё уже/.test(await sync(A)) && /Всё уже/.test(await sync(B)), 'дальше изменений нет');
+    ok(same(await getSt(A), b), 'A=B');
+  });
+
+  await run('9b. то же, но один шаблон на устройствах отличается', async br => {
+    const A = await newDev(br, 'A', baseA()); const st = baseA(); st.tabs[0].items[0].text = 'Другой текст на B';
+    const B = await newDev(br, 'B', st);
+    await sync(A); const msgB = await sync(B); console.log('B:', msgB.replace(/\n/g, ' '));
+    ok(/Конфликтов: 1/.test(msgB), 'конфликт только по изменённому шаблону');
+    const b = await getSt(B); ok(b.tabs[0].items.length === 5, 'добавилась одна копия, остальные не дублируются (' + b.tabs[0].items.length + ')');
+  });
+
+  await run('10. уборка точных копий «(другая версия)» через меню', async br => {
+    const A = await newDev(br, 'A', baseA());
+    await setSt(A, st => { const t = st.tabs[0]; t.items.push(it('c1', 'Привет (другая версия)', 'Здравствуйте', 'g1'), it('c2', '(другая версия)', 'корень'), it('c3', 'Пока (другая версия)', 'ДРУГОЙ текст', 'g1')); });
+    await A.page.click('#menu'); await A.page.getByText('GitHub: синхронизация и обновление').click(); await A.page.getByText('Убрать точные копии', { exact: false }).click(); await sleep(200);
+    console.log('dialog:', (await A.page.evaluate(() => document.querySelector('.sheet').innerText)).split('\n').slice(0, 3).join(' | '));
+    await A.page.getByText('Убрать 2', { exact: true }).click(); await sleep(300);
+    const a = await getSt(A), ids = a.tabs[0].items.map(i => i.id);
+    ok(!ids.includes('c1') && !ids.includes('c2') && ids.includes('c3') && ids.includes('a1') && ids.includes('a3'), 'точные копии убраны, отличающаяся копия и оригиналы на месте');
+    ok(a.trash.length === 2, 'копии лежат в корзине');
+  });
+
   console.log(fails ? '\nПРОВАЛЕНО: ' + fails : '\nВСЕ ПРОВЕРКИ ПРОШЛИ');
   process.exit(fails ? 1 : 0);
 })();
