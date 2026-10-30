@@ -369,6 +369,9 @@ body.pv-nowrap .sheet textarea.area{white-space:pre;overflow-wrap:normal;overflo
 .linkbtn{background:none;border:0;padding:0 4px;min-height:32px;color:var(--muted);font-size:13px;text-decoration:underline;cursor:pointer}
 /* кнопка со списком вкладок */
 .tjump{width:34px;font-size:15px}
+#syncBtn svg{width:22px;height:22px;fill:currentColor}
+@keyframes spinr{to{transform:rotate(360deg)}}
+#syncBtn.spin svg{animation:spinr 1s linear infinite}
 .tabmenu{position:fixed;z-index:40;min-width:200px;max-width:min(360px,92vw);overflow:auto;overscroll-behavior:contain;
   background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);padding:6px}
 .tabmenu .tmi{display:block;width:100%;text-align:left;min-height:44px;padding:0 12px;border:0;border-radius:10px;background:none;font:inherit;color:inherit;overflow-wrap:anywhere}
@@ -414,6 +417,7 @@ body.cols-grid.grid-vert:not(.sortmode) .rowflow{display:grid;grid-auto-flow:col
         <button class="iconbtn" id="topBtn" type="button" aria-label="Наверх" title="Наверх" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 11h3v10h2V11h3l-4-4-4 4zM4 3v2h16V3H4z"/></svg></button>
         <button class="iconbtn" id="collBtn" type="button" hidden></button>
         <button class="iconbtn" id="colsBtn" type="button" hidden></button>
+        <button class="iconbtn" id="syncBtn" type="button" aria-label="Синхронизировать" title="Синхронизировать (⟳)" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4V1L8 5l4 4V6a6 6 0 0 1 5.65 8h2.1A8 8 0 0 0 12 4zm-5.65 2A8 8 0 0 0 12 20v3l4-4-4-4v3a6 6 0 0 1-5.65-8h-2.1z"/></svg></button>
         <button class="iconbtn" id="sortBtn" aria-label="Режим сортировки (перетаскивание)">↕</button>
         <button class="iconbtn" id="menu" aria-label="Меню: экспорт, импорт, вкладки">⋮</button>
       </div>
@@ -459,7 +463,7 @@ body.cols-grid.grid-vert:not(.sortmode) .rowflow{display:grid;grid-auto-flow:col
 
 /* ---------- утилиты ---------- */
 const KEY = 'my-templates-v1';
-const APP_VERSION = '2026-10-29.2';
+const APP_VERSION = '2026-10-30.1';
 const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4);
 const $ = s => document.querySelector(s);
 
@@ -509,7 +513,8 @@ function normItem(i, gids) {
     mod: Number(i.mod) || 0,
     cr: Number(i.cr) || 0,
     pin: Number(i.pin) || 0,
-    group: gids && gids.has(i.group) ? i.group : null
+    group: gids && gids.has(i.group) ? i.group : null,
+    ...(Number(i.sm) ? { sm: Number(i.sm) } : {})
   };
 }
 function normGroup(g) {
@@ -520,7 +525,8 @@ function normGroup(g) {
     archived: !!g.archived,
     archByParent: !!g.archByParent,
     after: typeof g.after === 'string' ? g.after : undefined,
-    parent: typeof g.parent === 'string' && g.parent ? g.parent : null
+    parent: typeof g.parent === 'string' && g.parent ? g.parent : null,
+    ...(Number(g.sm) ? { sm: Number(g.sm) } : {})
   };
 }
 function normTab(t) {
@@ -543,6 +549,7 @@ function normTab(t) {
     groups,
     archived: !!t.archived,
     archiveOpen: !!t.archiveOpen,
+    ...(Number(t.sm) ? { sm: Number(t.sm) } : {}),
     items: (Array.isArray(t.items) ? t.items : []).filter(isObj).map(i => normItem(i, gids))
   };
 }
@@ -2882,7 +2889,7 @@ $('#file').addEventListener('change', async e => {
   e.target.value = '';
   if (!f) return;
   let incoming, raw = null;
-  try { raw = JSON.parse(await f.text()); incoming = normalize(raw); } catch (err) { incoming = null; }
+  try { raw = JSON.parse(await f.text()); if (isSyncFile(raw)) raw = syncFileToExport(raw); incoming = normalize(raw); } catch (err) { incoming = null; }
   if (!incoming) {
     await confirmDialog({
       title: 'Не удалось прочитать файл',
@@ -2954,11 +2961,13 @@ function menuSheet() {
       h('div', { class: 'btns' },
         curTab() ? btn('Выбрать несколько (массовые действия)', () => { api.close(); enterSelect(); }) : null,
         curTab() && !state.special ? btn('+ Новая группа в этой вкладке', () => { api.close(); newGroup(); }) : null,
+        syncCfg() ? btn('⟳ Синхронизировать', () => { api.close(); syncNow(); }, 'primary') : null,
         btn('Настройки вкладок', () => { api.close(); tabsSheet(); }),
         btn('Оформление и размеры…', () => { api.close(); uiSheet(); }),
         btn('Корзина' + (state.trash.length ? ' (' + state.trash.length + ')' : ''), () => { api.close(); trashSheet(); }),
         btn('Экспорт (сохранить копию в файл)', () => { api.close(); exportData(); }, 'primary exp'),
         btn('Импорт (загрузить из файла)', () => { api.close(); $('#file').click(); }),
+        btn('Синхронизация через GitHub…', () => { api.close(); syncSettings(); }),
         btn('Проверить обновление', () => { api.close(); checkUpdate(); }),
         btn(more ? 'Меньше ▴' : 'Ещё… ▾', () => { more = !more; draw(); }),
         ...(more ? [
@@ -2971,6 +2980,7 @@ function menuSheet() {
         h('p', { class: 'tmeta', style: 'text-align:center;margin:4px 0 0;white-space:pre-line',
           text: 'Версия приложения: ' + APP_VERSION +
             '\nПоследний экспорт: ' + (meta.lastExport ? fmtDateTime(meta.lastExport) : 'ещё не было') +
+            '\nСинхронизация: ' + (syncCfg() ? (readSyncSt().lastSync ? fmtDateTime(readSyncSt().lastSync) : 'ещё не было') : 'не настроена') +
             '\nПоследний импорт: ' + (meta.lastImport ? fmtDateTime(meta.lastImport.ts) + ' (' + meta.lastImport.mode + (meta.lastImport.file ? ', ' + meta.lastImport.file : '') + ')' : 'ещё не было') })));
     draw();
   });
@@ -3609,10 +3619,300 @@ function uiSheet() {
 mq('(prefers-color-scheme: dark)').addEventListener('change', () => applyUi());
 mq('(max-width: 700px)').addEventListener('change', () => applyUi());
 
+/* ---------- синхронизация через GitHub ---------- */
+// Один приватный репозиторий на все приложения; у каждого приложения своя папка. Отправка и получение — только по кнопке ⟳.
+const SYNC_KEY = 'mrtekhnik.sync', SYNC_DIR = 'shablony', SYNC_ST = KEY + ':sync';
+function syncCfg() { try { const v = JSON.parse(localStorage.getItem(SYNC_KEY) || 'null'); return v && v.repo && v.token ? v : null; } catch (e) { return null; } }
+function setSyncCfg(v) { try { if (v) localStorage.setItem(SYNC_KEY, JSON.stringify(v)); else localStorage.removeItem(SYNC_KEY); } catch (e) {} }
+function apiBase() { try { return localStorage.getItem('mrtekhnik.sync.api') || 'https://api.github.com'; } catch (e) { return 'https://api.github.com'; } }
+async function gh(cfg, path, opt = {}) {
+  const hd = { Authorization: 'Bearer ' + cfg.token, Accept: opt.raw ? 'application/vnd.github.raw' : 'application/vnd.github+json' };
+  if (opt.body) hd['Content-Type'] = 'application/json';
+  const r = await fetch(apiBase() + '/repos/' + cfg.repo + path, { method: opt.method || 'GET', cache: 'no-store', headers: hd, body: opt.body ? JSON.stringify(opt.body) : undefined });
+  if (opt.allow404 && (r.status === 404 || r.status === 409)) return null;
+  if (!r.ok) { const e = new Error('HTTP ' + r.status); e.status = r.status; try { e.msg = (await r.json()).message; } catch (_) {} throw e; }
+  return opt.raw ? r.text() : r.json();
+}
+function syncErrText(e) {
+  if (e && e.code === 'empty') return 'Репозиторий пустой. Создайте его с галочкой «Add a README file».';
+  if (e && e.code === 'public') return 'Репозиторий публичный — хранить в нём данные нельзя. Сделайте его приватным (Private).';
+  if (e && e.code === 'nowrite') return 'У токена нет прав на запись. При создании токена нужно право Contents: Read and write.';
+  if (e && e.status === 401) return 'GitHub не принял токен: проверьте его или выпустите новый (возможно, истёк срок действия).';
+  if (e && e.status === 403) return 'У токена нет прав на запись. При создании токена нужно право Contents: Read and write.';
+  if (e && e.status === 404) return 'Репозиторий не найден. Проверьте имя (вид: имя/репозиторий) и что токен выдан именно для этого репозитория.';
+  if (e instanceof TypeError) return 'Нет связи с GitHub. Проверьте интернет.';
+  return 'Ошибка: ' + ((e && (e.msg || e.message)) || e);
+}
+const devName = () => (/Android/i.test(navigator.userAgent) ? 'Android' : /Windows/i.test(navigator.userAgent) ? 'Windows' : 'устройство');
+const hashStr = s => { let a = 0xdeadbeef, b = 0x41c6ce57; for (let i = 0; i < s.length; i++) { const c = s.charCodeAt(i); a = Math.imul(a ^ c, 2654435761); b = Math.imul(b ^ c, 1597334677); }
+  a = Math.imul(a ^ (a >>> 16), 2246822507) ^ Math.imul(b ^ (b >>> 13), 3266489909); b = Math.imul(b ^ (b >>> 16), 2246822507) ^ Math.imul(a ^ (a >>> 13), 3266489909);
+  return (4294967296 * (2097151 & b) + (a >>> 0)).toString(36) + s.length; };
+const utf8b64 = s => { const u = new TextEncoder().encode(s); let r = ''; for (let i = 0; i < u.length; i += 0x8000) r += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000)); return btoa(r); };
+function readSyncSt() {
+  let v = null; try { v = JSON.parse(localStorage.getItem(SYNC_ST)); } catch (e) {}
+  v = isObj(v) ? v : {};
+  const k = isObj(v.known) ? v.known : {};
+  return { known: { i: k.i || {}, g: k.g || {}, t: k.t || {} }, hash: v.hash || {}, oh: v.oh || {}, ot: v.ot || {}, lastSync: Number(v.lastSync) || 0 };
+}
+const writeSyncSt = st => { try { localStorage.setItem(SYNC_ST, JSON.stringify(st)); } catch (e) {} };
+const toR = rec => { const { sm, ...c } = rec; return { m: sm, ...c }; };
+const fromR = r => { const { m, ...c } = r; return { ...c, sm: m }; };
+const entHash = rec => { const { sm, m, ...c } = rec; return hashStr(JSON.stringify(c)); };
+
+// Снимок локальных данных: записи (вкладки, группы, шаблоны), порядок и ссылки на объекты.
+// S и now заданы — у изменившихся с прошлой синхронизации записей обновляется метка времени sm (изменение определяется по содержимому).
+function syncLocal(S, now) {
+  const A = { t: {}, g: {}, i: {}, order: { t: [], i: {}, g: {} }, obj: { t: {}, g: {}, i: {} } };
+  const stamp = (obj, rec) => { if (S) { if (S.hash[rec.id] !== entHash(rec) || !obj.sm) obj.sm = now; } rec.sm = obj.sm || 0; return rec; };
+  state.tabs.forEach(tab => {
+    A.t[tab.id] = stamp(tab, { id: tab.id, name: tab.name, archived: !!tab.archived });
+    A.obj.t[tab.id] = tab; A.order.t.push(tab.id);
+    A.order.g[tab.id] = tab.groups.map(g => g.id); A.order.i[tab.id] = tab.items.map(i => i.id);
+    tab.groups.forEach(g => {
+      A.g[g.id] = stamp(g, { id: g.id, tab: tab.id, name: g.name, archived: !!g.archived, archByParent: !!g.archByParent, parent: g.parent || null, after: typeof g.after === 'string' ? g.after : null });
+      A.obj.g[g.id] = { obj: g, tab };
+    });
+    tab.items.forEach(it => {
+      A.i[it.id] = stamp(it, { id: it.id, tab: tab.id, title: it.title, text: it.text, fav: !!it.fav, inline: !!it.inline, archived: !!it.archived, archByGroup: !!it.archByGroup, mod: it.mod || 0, cr: it.cr || 0, pin: it.pin || 0, group: it.group || null });
+      A.obj.i[it.id] = { obj: it, tab };
+    });
+  });
+  return A;
+}
+const orderIds = (list, ids) => { const set = new Set(ids), seen = new Set(), out = [];
+  (list || []).forEach(id => { if (set.has(id) && !seen.has(id)) { seen.add(id); out.push(id); } });
+  ids.forEach(id => { if (!seen.has(id)) { seen.add(id); out.push(id); } });
+  return out; };   // порядок из list, затем недостающие из ids
+// Собирает вкладки «как в файле экспорта» из итоговых записей и списков порядка
+function assembleTabs(F, ord, local) {
+  const tabIds = orderIds(ord.t, Object.keys(F.t));
+  return tabIds.map(tid => {
+    const tr = F.t[tid], lo = local && local.obj.t[tid];
+    const gids = orderIds(ord.g[tid], Object.keys(F.g).filter(id => F.g[id].tab === tid));
+    const iids = orderIds(ord.i[tid], Object.keys(F.i).filter(id => F.i[id].tab === tid));
+    return {
+      id: tid, name: tr.name, archived: !!tr.archived, archiveOpen: lo ? !!lo.archiveOpen : false, sm: tr.sm,
+      groups: gids.map(id => { const g = F.g[id], lg = local && local.obj.g[id]; const o = { ...g, collapsed: lg ? !!lg.obj.collapsed : false }; delete o.tab; if (o.after === null) delete o.after; return o; }),
+      items: iids.map(id => { const o = { ...F.i[id] }; delete o.tab; return o; })
+    };
+  });
+}
+// Файл index.json из репозитория (в том числе скачанный из истории GitHub) → обычный формат копии, для «Импорта»
+const isSyncFile = d => isObj(d) && d.app === 'my-templates' && isObj(d.items) && isObj(d.groups) && isObj(d.tabs) && !Array.isArray(d.tabs);
+function syncFileToExport(R) {
+  const F = { t: {}, g: {}, i: {} };
+  Object.entries(R.tabs).forEach(([id, r]) => { if (isObj(r) && !(R.tomb && R.tomb[id] >= r.m)) F.t[id] = { ...fromR(r), id }; });
+  Object.entries(R.groups).forEach(([id, r]) => { if (isObj(r) && F.t[r.tab]) F.g[id] = { ...fromR(r), id }; });
+  Object.entries(R.items).forEach(([id, r]) => { if (isObj(r) && F.t[r.tab]) F.i[id] = { ...fromR(r), id }; });
+  const o = R.order || {}, lst = e => (e && Array.isArray(e.l) ? e.l : []);
+  const ord = { t: lst(o.t), g: {}, i: {} };
+  Object.keys(F.t).forEach(tid => { ord.g[tid] = lst(o.g && o.g[tid]); ord.i[tid] = lst(o.i && o.i[tid]); });
+  return { app: 'my-templates', version: 1, appVersion: APP_VERSION, exportedAt: new Date().toISOString(), active: null, tabs: assembleTabs(F, ord, null), trash: [], fromSync: true };
+}
+
+// объединение «списков» (вкладки, группы): побеждает более позднее изменение; удалённые хранятся «надгробиями» (tomb: id → время)
+function mergeList(Lm, Rm, tomb, kn, now) {
+  const F = {}, delLocal = [];
+  const ids = new Set([...Object.keys(Lm), ...Object.keys(Rm), ...Object.keys(kn)]);
+  let changed = 0;
+  for (const id of ids) {
+    const l = Lm[id], r = Rm[id], b = kn[id], t = tomb[id] || 0;
+    if (!l && !r) { delete kn[id]; continue; }
+    if (!l) {
+      if (b !== undefined && r.m === b) { delete Rm[id]; tomb[id] = now; delete kn[id]; changed++; continue; }      // удалено здесь
+      if (b === undefined && t >= r.m) continue;                                                                    // уже удалено раньше
+      F[id] = { ...fromR(r), id }; changed++; continue;
+    }
+    if (!r) {
+      if (t && t >= l.sm) { delLocal.push(id); delete kn[id]; changed++; continue; }                               // удалено на другом устройстве
+      F[id] = l; Rm[id] = toR(l); delete tomb[id]; changed++; continue;
+    }
+    if (l.sm === r.m) { F[id] = l; continue; }
+    if (l.sm > r.m) { F[id] = l; Rm[id] = toR(l); } else F[id] = { ...fromR(r), id };
+    changed++;
+  }
+  return { F, delLocal, changed };
+}
+// порядок: побеждает та сторона, где порядок менялся после прошлой синхронизации
+function mergeOrder(local, rent, oh, ot) {
+  const h = hashStr(JSON.stringify(local)), hasR = rent && Array.isArray(rent.l);
+  const lc = oh !== undefined && h !== oh, rc = hasR && rent.t !== ot;
+  if (!hasR) return { base: local, other: [] };
+  if (rc && !lc) return { base: rent.l, other: local };       // порядок менялся только в репозитории
+  return { base: local, other: rent.l };                      // только здесь, в обоих местах (побеждает этот) или нигде
+}
+
+async function syncOnce(cfg, onProgress) {
+  const ref = await gh(cfg, '/git/ref/heads/main', { allow404: true });
+  if (!ref) { const e = new Error('empty'); e.code = 'empty'; throw e; }
+  const head = ref.object.sha, commit = await gh(cfg, '/git/commits/' + head);
+  const txt = await gh(cfg, `/contents/${SYNC_DIR}/index.json?ref=${head}`, { raw: true, allow404: true });
+  let R0 = null;
+  if (txt) { try { R0 = JSON.parse(txt); } catch (e) { throw new Error('повреждён файл index.json в репозитории'); } if (!isObj(R0) || (R0.app && R0.app !== 'my-templates')) throw new Error('в папке ' + SYNC_DIR + ' лежат данные другого приложения'); }
+  const R = R0 || {};
+  R.v = 1; R.app = 'my-templates';
+  ['tabs', 'groups', 'items', 'purged', 'tomb'].forEach(k => { if (!isObj(R[k]) || Array.isArray(R[k])) R[k] = {}; });
+  R.order = isObj(R.order) ? R.order : {}; R.order.i = isObj(R.order.i) ? R.order.i : {}; R.order.g = isObj(R.order.g) ? R.order.g : {};
+  const before = txt ? JSON.stringify(JSON.parse(txt)) : '';
+  const S = readSyncSt(), now = Date.now();
+  const kn = { i: { ...S.known.i }, g: { ...S.known.g }, t: { ...S.known.t } };
+  const A = syncLocal(S, now);
+  let up = 0, down = 0, del = 0, conf = 0;
+  const prog = () => onProgress && onProgress(up + down);
+  const F = { t: {}, g: {}, i: {} }, trashEntries = [];
+  // --- шаблоны
+  const copyTitle = t => (t ? t + ' ' : '') + '(другая версия)';
+  const ids = new Set([...Object.keys(A.i), ...Object.keys(R.items), ...Object.keys(kn.i), ...Object.keys(R.purged)]);
+  const localRemove = id => { const lo = A.obj.i[id]; if (lo) { const g = lo.obj.group ? lo.tab.groups.find(x => x.id === lo.obj.group) : null;
+      trashEntries.push({ id: uid(), deletedAt: now, kind: 'item', tabId: lo.tab.id, tabName: lo.tab.name, groupId: g ? g.id : '', groupName: g ? g.name : '', item: lo.obj }); } };
+  for (const id of ids) {
+    const l = A.i[id], r = R.items[id], b = kn.i[id];
+    if (!l && !r) { delete kn.i[id]; continue; }
+    if (!l) {
+      if (b !== undefined && r.m === b) { delete R.items[id]; R.purged[id] = now; delete kn.i[id]; del++; continue; }       // удалён (в корзину или навсегда) на этом устройстве
+      if (b === undefined && R.purged[id] && R.purged[id] >= r.m) continue;
+      F.i[id] = { ...fromR(r), id }; kn.i[id] = r.m; down++; prog(); continue;
+    }
+    if (!r) {
+      if (R.purged[id] && b !== undefined && l.sm === b) { localRemove(id); delete kn.i[id]; del++; continue; }                  // удалён на другом устройстве
+      F.i[id] = l; R.items[id] = toR(l); delete R.purged[id]; kn.i[id] = l.sm; up++; prog(); continue;
+    }
+    if (l.sm === r.m) { F.i[id] = l; kn.i[id] = l.sm; continue; }
+    const lc = l.sm !== b, rc = r.m !== b;
+    if (lc && !rc) { F.i[id] = l; R.items[id] = toR(l); kn.i[id] = l.sm; up++; prog(); continue; }
+    if (rc && !lc) { F.i[id] = { ...fromR(r), id }; kn.i[id] = r.m; down++; prog(); continue; }
+    // изменён в обоих местах: основной становится более новая версия, другая сохраняется копией
+    conf++;
+    const remote = { ...fromR(r), id }, newer = l.sm >= r.m, win = newer ? l : remote, lose = newer ? remote : l;
+    const cp = { ...lose, id: uid(), title: copyTitle(lose.title), mod: now, cr: now, pin: 0, sm: now };
+    F.i[id] = win; kn.i[id] = win.sm; if (newer) { R.items[id] = toR(l); up++; } else down++;
+    F.i[cp.id] = cp; R.items[cp.id] = toR(cp); kn.i[cp.id] = cp.sm; up++; prog();
+  }
+  // --- вкладки и группы
+  const mt = mergeList(A.t, R.tabs, R.tomb, kn.t, now), mg = mergeList(A.g, R.groups, R.tomb, kn.g, now);
+  F.t = mt.F; F.g = mg.F;
+  // вкладка, удалённая на другом устройстве, но в которой остались шаблоны, возвращается
+  const usedTabs = new Set(Object.values(F.i).map(i => i.tab));
+  mt.delLocal.forEach(id => { if (usedTabs.has(id) && A.t[id]) { const rec = { ...A.t[id], sm: now }; F.t[id] = rec; R.tabs[id] = toR(rec); delete R.tomb[id]; } });
+  // шаблоны и группы без вкладки — в первую вкладку (если вкладок нет совсем — создаётся новая)
+  const fix = rec => { if (!F.t[rec.tab]) { let tid = Object.keys(F.t)[0]; if (!tid) { tid = uid(); F.t[tid] = { id: tid, name: 'Синхронизация', archived: false, sm: now }; R.tabs[tid] = toR(F.t[tid]); }
+      rec.tab = tid; } };
+  Object.values(F.g).forEach(fix); Object.values(F.i).forEach(fix);
+  // --- порядок
+  const ord = { t: [], i: {}, g: {} }, otNew = {}, ohNew = {};
+  const doOrder = (key, localList, rent, validIds) => {
+    const { base, other } = mergeOrder(localList, rent, S.oh[key], S.ot[key]);
+    const finalList = orderIds([...base, ...other], validIds);
+    const same = rent && Array.isArray(rent.l) && JSON.stringify(rent.l) === JSON.stringify(finalList);
+    const entry = same ? rent : { l: finalList, t: now };
+    otNew[key] = entry.t; ohNew[key] = hashStr(JSON.stringify(finalList));
+    return { list: finalList, entry };
+  };
+  const tabValid = Object.keys(F.t);
+  const rt = doOrder('t', A.order.t, R.order.t, tabValid); ord.t = rt.list; R.order.t = rt.entry;
+  const newI = {}, newG = {};
+  tabValid.forEach(tid => {
+    const iv = Object.keys(F.i).filter(id => F.i[id].tab === tid), gv = Object.keys(F.g).filter(id => F.g[id].tab === tid);
+    const ri = doOrder('i:' + tid, A.order.i[tid] || [], R.order.i[tid], iv); ord.i[tid] = ri.list; newI[tid] = ri.entry;
+    const rg = doOrder('g:' + tid, A.order.g[tid] || [], R.order.g[tid], gv); ord.g[tid] = rg.list; newG[tid] = rg.entry;
+  });
+  R.order.i = newI; R.order.g = newG;
+  const after = JSON.stringify(R);
+  // --- запись в репозиторий: одна синхронизация = один коммит
+  if (after !== before) {
+    const blob = await gh(cfg, '/git/blobs', { method: 'POST', body: { content: utf8b64(after), encoding: 'base64' } });
+    const tree = await gh(cfg, '/git/trees', { method: 'POST', body: { base_tree: commit.tree.sha, tree: [{ path: `${SYNC_DIR}/index.json`, mode: '100644', type: 'blob', sha: blob.sha }] } });
+    const c = await gh(cfg, '/git/commits', { method: 'POST', body: { message: `Мои шаблоны: синхронизация (${devName()})`, tree: tree.sha, parents: [head] } });
+    await gh(cfg, '/git/refs/heads/main', { method: 'PATCH', body: { sha: c.sha, force: false } });
+  }
+  // --- применяем на устройстве (только после успешного обновления ветки)
+  const nd = normalize({ tabs: assembleTabs(F, ord, A), active: state.active, trash: [...state.trash, ...trashEntries], recentOpen: state.recentOpen });
+  if (!nd) throw new Error('не удалось собрать данные');
+  state.tabs = nd.tabs; state.trash = nd.trash;
+  if (!state.tabs.some(t => t.id === state.active)) state.active = state.tabs[0] ? state.tabs[0].id : null;
+  save();
+  const A2 = syncLocal(null, 0), st = { known: { i: {}, g: {}, t: {} }, hash: {}, oh: ohNew, ot: otNew, lastSync: now };
+  [['t', A2.t], ['g', A2.g], ['i', A2.i]].forEach(([k, m]) => Object.values(m).forEach(rec => { st.known[k][rec.id] = rec.sm; st.hash[rec.id] = entHash(rec); }));
+  writeSyncSt(st);
+  return { up, down, del, conf, lists: mt.changed + mg.changed };
+}
+
+let syncing = false;
+function syncBusy(on, text) {
+  const b = document.getElementById('syncBtn'); if (b) b.classList.toggle('spin', !!on);
+  const el = document.getElementById('syncProg'); if (el) el.textContent = text || '';
+}
+function syncInfo(title, message) {
+  return confirmDialog({ title, message, buttons: [{ label: 'Понятно', value: true, kind: 'primary' }], cancelValue: true });
+}
+async function syncNow() {
+  const cfg = syncCfg();
+  if (!cfg) { toast('Сначала подключите GitHub'); syncSettings(); return; }
+  if (syncing) return;
+  syncing = true;
+  let dlg = null;
+  openModal((box, api) => { dlg = api; box.append(h('h2', { text: 'Синхронизация…' }), h('p', { class: 'msg', id: 'syncProg', text: 'Подключаюсь к GitHub' })); });
+  syncBusy(true, 'Подключаюсь к GitHub');
+  try {
+    let res;
+    for (let a = 0; a < 3; a++) {
+      try { res = await syncOnce(cfg, n => syncBusy(true, 'Синхронизация… ' + n)); break; }
+      catch (e) { if ((e.status === 422 || e.status === 409) && a < 2) continue; throw e; }
+    }
+    selMode = false; sel.clear(); sortSel.clear();
+    syncBusy(false); if (dlg) dlg.close();
+    renderTabs(); renderList(); updateSyncUi();
+    const parts = [];
+    if (res.up) parts.push('отправлено ' + res.up);
+    if (res.down) parts.push('получено ' + res.down);
+    if (res.del) parts.push('удалено ' + res.del);
+    if (res.lists) parts.push('обновлены вкладки и группы');
+    if (res.conf) await syncInfo('Синхронизация завершена', (parts.length ? parts.join(', ') + '.\n' : '') + 'Конфликтов: ' + res.conf + '. Шаблон меняли на обоих устройствах: основным остался более новый вариант, другой сохранён рядом с пометкой «(другая версия)». Ничего не потеряно — лишнее можно удалить.');
+    else toast(parts.length ? 'Синхронизировано: ' + parts.join(', ') : 'Всё уже синхронизировано');
+  } catch (e) {
+    syncBusy(false); if (dlg) dlg.close();
+    await syncInfo('Синхронизация не удалась', syncErrText(e) + '\n\nДанные на устройстве не изменены.');
+  } finally { syncing = false; syncBusy(false); }
+}
+async function syncCheck(cfg) {
+  const r = await gh(cfg, '');
+  if (r.private !== true) { const e = new Error('public'); e.code = 'public'; throw e; }
+  if (r.permissions && r.permissions.push === false) { const e = new Error('nowrite'); e.code = 'nowrite'; throw e; }
+  const ref = await gh(cfg, '/git/ref/heads/main', { allow404: true });
+  if (!ref) { const e = new Error('empty'); e.code = 'empty'; throw e; }
+  return r;
+}
+function syncSettings() {
+  openModal((box, api) => {
+    const cur = syncCfg();
+    const repo = h('input', { class: 'field', type: 'text', placeholder: 'имя/репозиторий, например mrtekhnik/sync', value: cur ? cur.repo : '', autocapitalize: 'off', autocomplete: 'off', spellcheck: 'false' });
+    const token = h('input', { class: 'field', type: 'password', placeholder: cur ? 'токен сохранён (введите новый, чтобы заменить)' : 'токен GitHub', autocomplete: 'off' });
+    const status = h('p', { class: 'msg', text: cur ? 'Подключено к ' + cur.repo + '.' : 'Не подключено. Подключение общее для всех ваших приложений на этом адресе.' });
+    const save = btn('Сохранить и проверить', async () => {
+      const cfg = { repo: repo.value.trim().replace(/^https?:\/\/github\.com\//, '').replace(/\/+$/, ''), token: token.value.trim() || (cur ? cur.token : '') };
+      if (!/^[\w.-]+\/[\w.-]+$/.test(cfg.repo) || !cfg.token) { status.textContent = 'Введите репозиторий (имя/репозиторий) и токен.'; return; }
+      status.textContent = 'Проверяю…';
+      try { await syncCheck(cfg); setSyncCfg(cfg); updateSyncUi(); status.textContent = 'Подключено к ' + cfg.repo + ' (приватный) ✓'; token.value = ''; }
+      catch (e) { status.textContent = syncErrText(e) + (e.code ? '' : '') + ' Настройка не сохранена.'; }
+    }, 'primary');
+    box.append(h('h2', { text: 'Синхронизация через GitHub' }),
+      h('p', { class: 'msg', text: 'Данные хранятся в вашем приватном репозитории. Отправка и получение — только по кнопке ⟳ в шапке или пунктом меню «Синхронизировать».' }),
+      h('label', { class: 'lbl', text: 'Репозиторий' }), repo, h('label', { class: 'lbl', text: 'Токен' }), token, status,
+      h('div', { class: 'btns' }, save,
+        btn('Отключить', () => { setSyncCfg(null); updateSyncUi(); status.textContent = 'Отключено. Данные на устройстве не тронуты.'; }),
+        btn('Закрыть', () => api.close(), 'ghost')));
+  });
+}
+function updateSyncUi() {
+  const b = document.getElementById('syncBtn'); if (b) b.hidden = !syncCfg();
+}
+
 /* ---------- запуск ---------- */
 $('#menu').addEventListener('click', menuSheet);
 $('#tabsManage').addEventListener('click', tabsSheet);
 $('#tabsJump').addEventListener('click', tabsJump);
+$('#syncBtn').addEventListener('click', syncNow);
+updateSyncUi();
 $('#add').addEventListener('click', () => addItem());
 $('#q').addEventListener('input', e => { query = e.target.value; renderList(); });
 $('#arch').addEventListener('click', () => { searchArchive = !searchArchive; syncScope(); renderList(); });
