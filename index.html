@@ -374,6 +374,8 @@ body.pv-nowrap .sheet textarea.area{white-space:pre;overflow-wrap:normal;overflo
 #syncBtn::before{left:-8px}
 #syncBtn::after{right:-8px}
 #syncBtn svg{width:22px;height:22px;fill:currentColor}
+#syncBtn .sdot{display:none;position:absolute;top:6px;right:6px;width:9px;height:9px;border-radius:50%;background:#ffd600;box-shadow:0 0 0 1.5px var(--surface)}
+#syncBtn.has .sdot{display:block}
 @keyframes spinr{to{transform:rotate(360deg)}}
 #syncBtn.spin svg{animation:spinr 1s linear infinite}
 .tabmenu{position:fixed;z-index:40;min-width:200px;max-width:min(360px,92vw);overflow:auto;overscroll-behavior:contain;
@@ -421,7 +423,7 @@ body.cols-grid.grid-vert:not(.sortmode) .rowflow{display:grid;grid-auto-flow:col
         <button class="iconbtn" id="topBtn" type="button" aria-label="Наверх" title="Наверх" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 11h3v10h2V11h3l-4-4-4 4zM4 3v2h16V3H4z"/></svg></button>
         <button class="iconbtn" id="collBtn" type="button" hidden></button>
         <button class="iconbtn" id="colsBtn" type="button" hidden></button>
-        <button class="iconbtn" id="syncBtn" type="button" aria-label="Синхронизировать" title="Синхронизировать (⟳)" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4V1L8 5l4 4V6a6 6 0 0 1 5.65 8h2.1A8 8 0 0 0 12 4zm-5.65 2A8 8 0 0 0 12 20v3l4-4-4-4v3a6 6 0 0 1-5.65-8h-2.1z"/></svg></button>
+        <button class="iconbtn" id="syncBtn" type="button" aria-label="Синхронизировать" title="Синхронизировать (⟳)" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4V1L8 5l4 4V6a6 6 0 0 1 5.65 8h2.1A8 8 0 0 0 12 4zm-5.65 2A8 8 0 0 0 12 20v3l4-4-4-4v3a6 6 0 0 1-5.65-8h-2.1z"/></svg><i class="sdot" aria-hidden="true"></i></button>
         <button class="iconbtn" id="sortBtn" aria-label="Режим сортировки (перетаскивание)">↕</button>
         <button class="iconbtn" id="menu" aria-label="Меню: экспорт, импорт, вкладки">⋮</button>
       </div>
@@ -467,7 +469,7 @@ body.cols-grid.grid-vert:not(.sortmode) .rowflow{display:grid;grid-auto-flow:col
 
 /* ---------- утилиты ---------- */
 const KEY = 'my-templates-v1';
-const APP_VERSION = '2026-10-30.3';
+const APP_VERSION = '2026-10-30.4';
 const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4);
 const $ = s => document.querySelector(s);
 
@@ -621,6 +623,7 @@ function save() {
     localStorage.setItem(KEY, JSON.stringify(state));
     if (!storageOk) { storageOk = true; showWarn(); }
     maybeAuto();
+    try { scheduleSyncDot(); } catch (e2) { /* модуль синхронизации ещё не загружен */ }
   } catch (e) {
     storageOk = false; showWarn();
   }
@@ -3659,7 +3662,7 @@ function readSyncSt() {
   let v = null; try { v = JSON.parse(localStorage.getItem(SYNC_ST)); } catch (e) {}
   v = isObj(v) ? v : {};
   const k = isObj(v.known) ? v.known : {};
-  return { known: { i: k.i || {}, g: k.g || {}, t: k.t || {} }, hash: v.hash || {}, oh: v.oh || {}, ot: v.ot || {}, lastSync: Number(v.lastSync) || 0 };
+  return { known: { i: k.i || {}, g: k.g || {}, t: k.t || {} }, hash: v.hash || {}, oh: v.oh || {}, ot: v.ot || {}, lastSync: Number(v.lastSync) || 0, dirtySince: Number(v.dirtySince) || 0 };
 }
 const writeSyncSt = st => { try { localStorage.setItem(SYNC_ST, JSON.stringify(st)); } catch (e) {} };
 const toR = rec => { const { sm, ...c } = rec; return { m: sm, ...c }; };
@@ -3898,6 +3901,9 @@ function syncSettings() {
     const repo = h('input', { class: 'field', type: 'text', placeholder: 'имя/репозиторий, например mrtekhnik/sync', value: cur ? cur.repo : '', autocapitalize: 'off', autocomplete: 'off', spellcheck: 'false' });
     const token = h('input', { class: 'field', type: 'password', placeholder: cur ? 'токен сохранён (введите новый, чтобы заменить)' : 'токен GitHub', autocomplete: 'off' });
     const status = h('p', { class: 'msg', text: cur ? 'Подключено к ' + cur.repo + '.' : 'Не подключено. Подключение общее для всех ваших приложений на этом адресе.' });
+    const delayRow = h('div', { class: 'thm' });
+    const mkDelay = () => delayRow.replaceChildren(...SYNC_DELAYS.map(([v, n]) => btn(n, () => { const m = readMeta(); m.syncDelay = v; writeMeta(m); mkDelay(); updateSyncDot(); }, syncDelay() === v ? 'primary' : '')));
+    mkDelay();
     const save = btn('Сохранить и проверить', async () => {
       const cfg = { repo: repo.value.trim().replace(/^https?:\/\/github\.com\//, '').replace(/\/+$/, ''), token: token.value.trim() || (cur ? cur.token : '') };
       if (!/^[\w.-]+\/[\w.-]+$/.test(cfg.repo) || !cfg.token) { status.textContent = 'Введите репозиторий (имя/репозиторий) и токен.'; return; }
@@ -3908,6 +3914,9 @@ function syncSettings() {
     box.append(h('h2', { text: 'Синхронизация через GitHub' }),
       h('p', { class: 'msg', text: 'Данные хранятся в вашем приватном репозитории. Отправка и получение — только по кнопке ⟳ в шапке или пунктом меню «Синхронизировать».' }),
       h('label', { class: 'lbl', text: 'Репозиторий' }), repo, h('label', { class: 'lbl', text: 'Токен' }), token, status,
+      h('div', { class: 'uilbl', text: 'Напоминать о синхронизации (жёлтая точка на ⟳)' }),
+      delayRow,
+      h('p', { class: 'tmeta', style: 'margin:4px 0 12px', text: 'Отсчёт — от первого несинхронизированного изменения. Изменения с другого устройства точка не показывает.' }),
       h('div', { class: 'btns' }, save,
         btn('Отключить', () => { setSyncCfg(null); updateSyncUi(); status.textContent = 'Отключено. Данные на устройстве не тронуты.'; }),
         btn('Закрыть', () => api.close(), 'ghost')));
@@ -3915,7 +3924,40 @@ function syncSettings() {
 }
 function updateSyncUi() {
   const b = document.getElementById('syncBtn'); if (b) b.hidden = !syncCfg();
+  updateSyncDot();
 }
+/* ---------- жёлтая точка: есть изменения, не отправленные в GitHub ---------- */
+const SYNC_DELAYS = [[0, 'Сразу'], [3600000, 'Через 1 ч'], [10800000, 'Через 3 ч'], [86400000, 'Через сутки']];
+const syncDelay = () => { const d = readMeta().syncDelay; return SYNC_DELAYS.some(x => x[0] === d) ? d : 3600000; };
+// есть ли правки после последней синхронизации (сравнение по содержимому; просмотр, выделение, свёрнутые группы и настройки не считаются)
+function syncChanged(S) {
+  const A = syncLocal(null, 0);
+  for (const k of ['t', 'g', 'i']) {
+    for (const rec of Object.values(A[k])) if (S.hash[rec.id] !== entHash(rec)) return true;
+    for (const id of Object.keys(S.known[k])) if (!A[k][id]) return true;
+  }
+  const same = (key, list) => S.oh[key] === undefined || S.oh[key] === hashStr(JSON.stringify(list));
+  if (!same('t', A.order.t)) return true;
+  return A.order.t.some(tid => !same('i:' + tid, A.order.i[tid]) || !same('g:' + tid, A.order.g[tid]));
+}
+function updateSyncDot() {
+  const b = document.getElementById('syncBtn'); if (!b) return;
+  clearTimeout(updateSyncDot.t);
+  let dirty = false;
+  if (syncCfg()) {
+    const S = readSyncSt();
+    if (!S.lastSync) dirty = true;
+    else if (syncChanged(S)) {
+      if (!S.dirtySince) { S.dirtySince = Date.now(); writeSyncSt(S); }
+      const left = syncDelay() - (Date.now() - S.dirtySince);
+      if (left <= 0) dirty = true; else updateSyncDot.t = setTimeout(updateSyncDot, Math.min(left + 500, 2147483000));
+    } else if (S.dirtySince) { S.dirtySince = 0; writeSyncSt(S); }
+  }
+  b.classList.toggle('has', dirty);
+  b.title = dirty ? 'Есть несинхронизированные изменения' : 'Синхронизировать';
+  b.setAttribute('aria-label', b.title);
+}
+function scheduleSyncDot() { clearTimeout(scheduleSyncDot.t); scheduleSyncDot.t = setTimeout(updateSyncDot, 300); }
 
 /* ---------- запуск ---------- */
 $('#menu').addEventListener('click', menuSheet);
