@@ -467,7 +467,7 @@ body.cols-grid.grid-vert:not(.sortmode) .rowflow{display:grid;grid-auto-flow:col
 
 /* ---------- утилиты ---------- */
 const KEY = 'my-templates-v1';
-const APP_VERSION = '2026-10-30.2';
+const APP_VERSION = '2026-10-30.3';
 const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4);
 const $ = s => document.querySelector(s);
 
@@ -3668,10 +3668,10 @@ const entHash = rec => { const { sm, m, ...c } = rec; return hashStr(JSON.string
 
 // Снимок локальных данных: записи (вкладки, группы, шаблоны), порядок и ссылки на объекты.
 // S и now заданы — у изменившихся с прошлой синхронизации записей обновляется метка времени sm (изменение определяется по содержимому).
-function syncLocal(S, now) {
+function syncLocal(S, now, tabs) {
   const A = { t: {}, g: {}, i: {}, order: { t: [], i: {}, g: {} }, obj: { t: {}, g: {}, i: {} } };
   const stamp = (obj, rec) => { if (S) { if (S.hash[rec.id] !== entHash(rec) || !obj.sm) obj.sm = now; } rec.sm = obj.sm || 0; return rec; };
-  state.tabs.forEach(tab => {
+  (tabs || state.tabs).forEach(tab => {
     A.t[tab.id] = stamp(tab, { id: tab.id, name: tab.name, archived: !!tab.archived });
     A.obj.t[tab.id] = tab; A.order.t.push(tab.id);
     A.order.g[tab.id] = tab.groups.map(g => g.id); A.order.i[tab.id] = tab.items.map(i => i.id);
@@ -3763,7 +3763,10 @@ async function syncOnce(cfg, onProgress) {
   const before = txt ? JSON.stringify(JSON.parse(txt)) : '';
   const S = readSyncSt(), now = Date.now();
   const kn = { i: { ...S.known.i }, g: { ...S.known.g }, t: { ...S.known.t } };
-  const A = syncLocal(S, now);
+  // Совсем новое приложение с нетронутой стартовой вкладкой «Работа» и примером: при первой синхронизации она не нужна
+  const t0 = state.tabs[0];
+  const pristine = !S.lastSync && state.tabs.length === 1 && t0.groups.length === 0 && t0.items.length === 1 && /^Нажмите на карточку — этот текст скопируется/.test(t0.items[0].text);
+  const A = syncLocal(S, now, pristine && Object.keys(R.items).length ? [] : null);
   let up = 0, down = 0, del = 0, conf = 0;
   const prog = () => onProgress && onProgress(up + down);
   const F = { t: {}, g: {}, i: {} }, trashEntries = [];
