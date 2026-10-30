@@ -469,7 +469,7 @@ body.cols-grid.grid-vert:not(.sortmode) .rowflow{display:grid;grid-auto-flow:col
 
 /* ---------- утилиты ---------- */
 const KEY = 'my-templates-v1';
-const APP_VERSION = '2026-10-30.5';
+const APP_VERSION = '2026-10-30.6';
 const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4);
 const $ = s => document.querySelector(s);
 
@@ -2977,7 +2977,6 @@ function menuSheet() {
         ...(gh2 ? [
           syncCfg() ? btn('⟳ Синхронизировать', () => { api.close(); syncNow(); }) : null,
           btn('Настройка синхронизации…', () => { api.close(); syncSettings(); }),
-          btn('Убрать точные копии «(другая версия)»', () => { api.close(); cleanConflictCopies(); }),
           btn('Проверить обновление приложения', () => { api.close(); checkUpdate(); })
         ] : []),
         btn(more ? 'Меньше ▴' : 'Ещё… ▾', () => { more = !more; draw(); }),
