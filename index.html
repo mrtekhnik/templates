@@ -187,6 +187,10 @@ button{font:inherit;color:inherit;cursor:pointer}
 @media (min-width:640px){.sheet.editor{align-self:center;margin-top:0;height:min(86vh,720px)}}
 .sheet.editor .ed-title{margin:0;font-size:16px}
 .sheet.editor .area{min-height:96px}
+.edtools{flex:none;display:flex;gap:6px;align-items:stretch;min-width:0}
+.edtools .symbar{flex:1}
+.undob{flex:none;width:44px;min-height:38px;border-radius:10px;border:1px solid var(--line);background:var(--surface);color:var(--ink);font-size:22px;line-height:1;padding:0}
+.undob:disabled{opacity:.35}
 .symbar{flex:none;display:flex;flex-direction:column;gap:4px;min-width:0}
 .symrow{display:flex;gap:4px;overflow-x:auto;scrollbar-width:none;padding-bottom:1px}
 .symrow::-webkit-scrollbar{display:none}
@@ -475,7 +479,7 @@ body.cols-grid.grid-vert:not(.sortmode) .rowflow{display:grid;grid-auto-flow:col
 
 /* ---------- утилиты ---------- */
 const KEY = 'my-templates-v1';
-const APP_VERSION = '2026-11-03.1';
+const APP_VERSION = '2026-11-03.2';
 const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4);
 const $ = s => document.querySelector(s);
 
@@ -823,7 +827,7 @@ const SYM_SETS = [
   ['Индексы', '⁰ ¹ ² ³ ⁴ ⁵ ⁶ ⁷ ⁸ ⁹ ⁺ ⁻ ⁿ ₀ ₁ ₂ ₃ ₄ ₅ ₆ ₇ ₈ ₉ ₊ ₋']
 ];
 // Панель символов: вставляет знак в то поле (название/текст), где был курсор
-function symbolBar(fields, getLast) {
+function symbolBar(fields, getLast, hist) {
   const bar = h('div', { class: 'symbar' });
   const draw = () => {
     const u = uiGet(), ci = clampN(u.symcat, 0, SYM_SETS.length - 1, 0);
@@ -837,10 +841,11 @@ function symbolBar(fields, getLast) {
         type: 'button', 'aria-label': 'Вставить ' + ch, onmousedown: keep, ontouchstart() {},
         onclick() {
           const f = getLast() || fields[0];
-          f.focus();
+          f.focus(); hist.commit(f);
           const a = f.selectionStart == null ? f.value.length : f.selectionStart, b = f.selectionEnd == null ? a : f.selectionEnd;
           f.setRangeText(ch, a, b, 'end');
           f.dispatchEvent(new Event('input', { bubbles: true }));
+          hist.commit(f);
         }
       }, ch))));
   };
@@ -944,10 +949,56 @@ function openEditor(heading, base, tab, onSave) {
       else if (r === 'discard') api.close();
     };
     let lastField = x;
-    t.addEventListener('focus', () => { lastField = t; });
-    x.addEventListener('focus', () => { lastField = x; });
-    const symBar = uiGet().symbols !== false ? symbolBar([x, t], () => lastField) : null;
-    box.append(h('h2', { class: 'ed-title', text: heading }), t, x, symBar, err, more, extra,
+    // собственная история отмены: шаг = пауза в наборе ~0,6 с (по умолчанию) или пробел/знак препинания
+    const hist = (() => {
+      const st = new Map(), timers = new Map();
+      [x, t].forEach(f => st.set(f, [{ v: f.value, c: f.value.length }]));
+      const top = f => { const a = st.get(f); return a[a.length - 1]; };
+      const pending = f => f.value !== top(f).v;
+      const commit = f => {
+        clearTimeout(timers.get(f));
+        if (pending(f)) st.get(f).push({ v: f.value, c: f.selectionStart == null ? f.value.length : f.selectionStart });
+        refresh();
+      };
+      const can = f => pending(f) || st.get(f).length > 1;
+      const undo = f => {
+        clearTimeout(timers.get(f));
+        if (!pending(f)) { if (st.get(f).length < 2) return; st.get(f).pop(); }
+        const e = top(f);
+        f.value = e.v; f.focus(); try { f.setSelectionRange(e.c, e.c); } catch (er) {}
+        refresh();
+      };
+      const BOUND = /[\s.,;:!?…)»”"\]]/;
+      const onInput = (f, e) => {
+        if (uiGet().undoMode === 'word') {
+          const c = f.selectionStart == null ? f.value.length : f.selectionStart;
+          if (e.inputType && e.inputType.startsWith('insert') && c > 0 && BOUND.test(f.value[c - 1])) commit(f);
+        } else {
+          clearTimeout(timers.get(f));
+          timers.set(f, setTimeout(() => commit(f), 600));
+        }
+        refresh();
+      };
+      let btnEl = null;
+      const refresh = () => { if (btnEl) btnEl.disabled = !can(lastField); };
+      return { commit, undo, onInput, can, refresh, bind(b) { btnEl = b; } };
+    })();
+    [t, x].forEach(f => {
+      f.addEventListener('focus', () => { hist.commit(lastField); lastField = f; hist.refresh(); });
+      f.addEventListener('input', e => hist.onInput(f, e));
+      f.addEventListener('keydown', e => {
+        if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && (e.key === 'z' || e.key === 'Z' || e.key === 'я' || e.key === 'Я')) { e.preventDefault(); hist.undo(f); }
+      });
+    });
+    const undoBtn = h('button', {
+      type: 'button', class: 'undob', title: 'Отменить последнее действие (шаг — по настройке: пауза или пробел/знак)', 'aria-label': 'Отменить',
+      onmousedown(e) { e.preventDefault(); },
+      onclick() { hist.undo(lastField); }
+    }, '↶');
+    hist.bind(undoBtn); hist.refresh();
+    const symBar = uiGet().symbols !== false ? symbolBar([x, t], () => lastField, hist) : null;
+    const edTools = h('div', { class: 'edtools' }, undoBtn, symBar);
+    box.append(h('h2', { class: 'ed-title', text: heading }), t, x, edTools, err, more, extra,
       h('div', { class: 'btns two' },
         btn('Отмена', api.dismiss),
         base.id ? h('button', { class: 'btn icon danger', type: 'button', 'aria-label': 'Удалить шаблон', title: 'Удалить шаблон', onclick() { api.close(); delItem(base.id); } }, '🗑') : null,
@@ -3401,7 +3452,7 @@ function joinSheet() {
 
 /* ---------- оформление и размеры (отдельно для телефона и компьютера; в экспорт не входят) ---------- */
 const UI_KEY = KEY + ':ui';
-const UI_DEFAULTS = { recentN: 10, newFocus: 'text', colfix: true, lockbg: false, theme: 'auto', accent: 'teal', ahue: 0, asat: 0, alight: 0, fs: 17, ch: 72, lines: 3, gap: 10, gfs: 16, gh: 48, width: 720, full: false, colmode: 'off', cols: 2, gridflow: 'row', pvw: 720, pvnw: false, archShow: true, symbols: true, symcat: 0 };
+const UI_DEFAULTS = { recentN: 10, newFocus: 'text', colfix: true, lockbg: false, theme: 'auto', accent: 'teal', ahue: 0, asat: 0, alight: 0, fs: 17, ch: 72, lines: 3, gap: 10, gfs: 16, gh: 48, width: 720, full: false, colmode: 'off', cols: 2, gridflow: 'row', pvw: 720, pvnw: false, archShow: true, symbols: true, symcat: 0, undoMode: 'pause' };
 const THEME_NAMES = { auto: 'Как в системе', light: 'Светлая', dark: 'Тёмная', black: 'Чёрная', sand: 'Песочная', contrast: 'Контрастная' };
 const BASES = {
   light:    { dark: false, bg: '#eff2f0', surface: '#ffffff', ink: '#182022', muted: '#62706f', line: '#d9dfdc', danger: '#b3261e', shadow: '0 6px 20px rgba(13,40,35,.22)' },
@@ -3657,6 +3708,9 @@ function uiSheet() {
         ]),
         grp('windows', 'Окна просмотра и правки',
           ...(phone ? [] : [slider('Ширина окна', 'pvw', 480, 1800, 20, px, 'px')]),
+          h('div', { class: 'uilbl', text: 'Шаг отмены ↶ в окне правки' }),
+          h('div', { class: 'thm' }, [['pause', 'По паузе (0,6 с)'], ['word', 'По пробелу и знаку']].map(([k, n]) =>
+            btn(n, () => { uiPut({ undoMode: k }); draw(); }, (u.undoMode === 'word' ? 'word' : 'pause') === k ? 'primary' : ''))),
           h('label', { class: 'chk' }, nw, h('span', { text: 'Не переносить длинные строки (прокрутка вбок) — удобно для тех. требований' })),
           h('label', { class: 'chk' }, sy, h('span', { text: 'Панель символов в окне правки шаблона (Ø ° ± × → ✓ …; нажатие вставляет знак там, где курсор)' })),
           h('label', { class: 'chk' }, lock, h('span', { text: 'Фиксировать фон, пока открыто окно (включите, если на телефоне окно дёргается)' }))),

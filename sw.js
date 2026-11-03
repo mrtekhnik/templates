@@ -1,5 +1,5 @@
 // Сервис-воркер «Мои шаблоны». ВЕРСИЯ ниже должна совпадать с APP_VERSION в index.html (меняется при каждом выпуске).
-const VERSION = '2026-11-03.1';
+const VERSION = '2026-11-03.2';
 const CACHE = 'shablony-' + VERSION;
 const FILES = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png', './icon-maskable-512.png', './apple-touch-icon.png'];
 
