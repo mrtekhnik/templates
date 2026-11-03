@@ -479,7 +479,7 @@ body.cols-grid.grid-vert:not(.sortmode) .rowflow{display:grid;grid-auto-flow:col
 
 /* ---------- утилиты ---------- */
 const KEY = 'my-templates-v1';
-const APP_VERSION = '2026-11-03.3';
+const APP_VERSION = '2026-11-03.4';
 const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4);
 const $ = s => document.querySelector(s);
 
@@ -970,9 +970,14 @@ function openEditor(heading, base, tab, onSave) {
       };
       const BOUND = /[\s.,;:!?…)»”"\]]/;
       const onInput = (f, e) => {
-        if (uiGet().undoMode === 'word') {
+        const mode = uiGet().undoMode;
+        if (mode === 'word' || mode === 'sentence') {
           const c = f.selectionStart == null ? f.value.length : f.selectionStart;
-          if (e.inputType && e.inputType.startsWith('insert') && c > 0 && BOUND.test(f.value[c - 1])) commit(f);
+          if (e.inputType && e.inputType.startsWith('insert') && c > 0) {
+            const ch = f.value[c - 1];
+            // слово: пробел, перевод строки или знак; предложение: перевод строки или пробел после . ! ? …
+            if (mode === 'word' ? BOUND.test(ch) : (ch === '\n' || (/\s/.test(ch) && c > 1 && /[.!?…]/.test(f.value[c - 2])))) commit(f);
+          }
         } else {
           clearTimeout(timers.get(f));
           timers.set(f, setTimeout(() => commit(f), 600));
@@ -991,7 +996,7 @@ function openEditor(heading, base, tab, onSave) {
       });
     });
     const undoBtn = h('button', {
-      type: 'button', class: 'undob', title: 'Отменить последнее действие (шаг — по настройке: пауза или слово)', 'aria-label': 'Отменить',
+      type: 'button', class: 'undob', title: 'Отменить последнее действие (шаг — по настройке: серия набора, слово или предложение)', 'aria-label': 'Отменить',
       onmousedown(e) { e.preventDefault(); },
       onclick() { hist.undo(lastField); }
     }, '↶');
@@ -3709,8 +3714,9 @@ function uiSheet() {
         grp('windows', 'Окна просмотра и правки',
           ...(phone ? [] : [slider('Ширина окна', 'pvw', 480, 1800, 20, px, 'px')]),
           h('div', { class: 'uilbl', text: 'Шаг отмены ↶ в окне правки' }),
-          h('div', { class: 'thm' }, [['pause', 'По паузе (0,6 с)'], ['word', 'По слову (пробел, знак)']].map(([k, n]) =>
-            btn(n, () => { uiPut({ undoMode: k }); draw(); }, (u.undoMode === 'word' ? 'word' : 'pause') === k ? 'primary' : ''))),
+          h('p', { class: 'msg', style: 'margin:0 0 6px', text: 'Серия набора — шаг заканчивается паузой около 0,6 с. Слово — пробелом или знаком препинания. Предложение — пробелом после . ! ? … или переводом строки.' }),
+          h('div', { class: 'thm' }, [['pause', 'Серия набора (до паузы)'], ['word', 'Слово'], ['sentence', 'Предложение']].map(([k, n]) =>
+            btn(n, () => { uiPut({ undoMode: k }); draw(); }, (u.undoMode === 'word' || u.undoMode === 'sentence' ? u.undoMode : 'pause') === k ? 'primary' : ''))),
           h('label', { class: 'chk' }, nw, h('span', { text: 'Не переносить длинные строки (прокрутка вбок) — удобно для тех. требований' })),
           h('label', { class: 'chk' }, sy, h('span', { text: 'Панель символов в окне правки шаблона (Ø ° ± × → ✓ …; нажатие вставляет знак там, где курсор)' })),
           h('label', { class: 'chk' }, lock, h('span', { text: 'Фиксировать фон, пока открыто окно (включите, если на телефоне окно дёргается)' }))),

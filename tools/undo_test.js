@@ -34,10 +34,19 @@ const { chromium } = require('playwright');
   await undo(); ok(await val() === 'один ', 'word: шаг 2: ' + JSON.stringify(await val()));
   await undo(); ok(await val() === '', 'word: шаг 3');
   await p.keyboard.type('a, b'); await undo(); ok(await val() === 'a, ', 'word: запятая+пробел: ' + JSON.stringify(await val()));
+  // режим «предложение»
+  await p.evaluate(() => { const k = 'my-templates-v1:ui'; const st = JSON.parse(localStorage.getItem(k) || '{}'); for (const pk of ['phone','desktop']) st[pk] = { ...(st[pk]||{}), undoMode: 'sentence' }; localStorage.setItem(k, JSON.stringify(st)); });
+  await p.reload(); await p.waitForTimeout(400); await p.click('#add'); await p.waitForSelector('.undob');
+  await p.click('textarea.area'); await p.keyboard.type('Один два. Три, четыре! Пять шесть');
+  await undo(); ok(await val() === 'Один два. Три, четыре! ', 'sentence: шаг 1: ' + JSON.stringify(await val()));
+  await undo(); ok(await val() === 'Один два. ', 'sentence: шаг 2: ' + JSON.stringify(await val()));
+  await undo(); ok(await val() === '', 'sentence: шаг 3');
+  await p.keyboard.type('т.д. и'); await undo(); ok(await val() === 'т.д. ', 'sentence: шаг после «т.д. »: ' + JSON.stringify(await val()));
+  await undo(); ok(await val() === '', 'sentence: откат до пустого');
   // название отдельно
   await p.focus('input.field[type=text]'); await p.keyboard.type('Тема'); await undo();
   ok(await p.inputValue('input.field[type=text]') === '', 'название откатывается отдельно');
-  ok(await val() === 'a, ', 'текст при этом цел');
+  ok(await val() === '', 'текст при этом цел');
   await p.screenshot({ path: '/tmp/gm/undo1.png' });
   console.log('errors:', errs); console.log(fails ? 'ПРОВАЛЕНО ' + fails : 'ВСЕ ПРОШЛИ');
   await b.close(); process.exit(fails ? 1 : 0);
