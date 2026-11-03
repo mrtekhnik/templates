@@ -187,6 +187,12 @@ button{font:inherit;color:inherit;cursor:pointer}
 @media (min-width:640px){.sheet.editor{align-self:center;margin-top:0;height:min(86vh,720px)}}
 .sheet.editor .ed-title{margin:0;font-size:16px}
 .sheet.editor .area{min-height:96px}
+.symbar{flex:none;display:flex;flex-direction:column;gap:4px;min-width:0}
+.symrow{display:flex;gap:4px;overflow-x:auto;scrollbar-width:none;padding-bottom:1px}
+.symrow::-webkit-scrollbar{display:none}
+.symrow button{flex:none;min-width:38px;min-height:38px;padding:0 8px;border-radius:10px;border:1px solid var(--line);background:var(--surface);color:var(--ink);font-size:18px;line-height:1}
+.symrow.cats button{min-height:30px;min-width:0;border-radius:999px;font-size:13px;color:var(--muted);padding:0 12px;white-space:nowrap}
+.symrow.cats button.on{background:var(--accent-soft);color:var(--ink);border-color:var(--accent);font-weight:600}
 .ed-more{background:none;border:0;padding:0;min-height:36px;text-align:left;color:var(--muted);font-size:14px;overflow-wrap:anywhere}
 .ed-extra{display:flex;flex-direction:column;gap:8px}
 .kb .sheet.editor .ed-title,.kb .sheet.editor .ed-more,.kb .sheet.editor .ed-extra{display:none}
@@ -469,7 +475,7 @@ body.cols-grid.grid-vert:not(.sortmode) .rowflow{display:grid;grid-auto-flow:col
 
 /* ---------- утилиты ---------- */
 const KEY = 'my-templates-v1';
-const APP_VERSION = '2026-10-30.6';
+const APP_VERSION = '2026-11-03.1';
 const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4);
 const $ = s => document.querySelector(s);
 
@@ -807,6 +813,41 @@ function promptName(title, initial, placeholder) {
   });
 }
 
+const SYM_SETS = [
+  ['Техн.', 'Ø ⌀ ° ± × ÷ ² ³ ½ ¼ ¾ ≈ ≠ ≤ ≥ ∠ ⊥ ∥ ⌒ ∞ √ ‰ µ Ω ′ ″ № §'],
+  ['Стрелки', '→ ← ↑ ↓ ↔ ↕ ⇒ ⇐ ⇔ ↗ ↘ ↖ ↙ ➜ ▶ ◀ ▲ ▼ ↩ ↪ ⟳'],
+  ['Знаки', '• ◦ ▪ — – … « » „ “ ” ‘ ’ © ® ™ ¶ † ‡ · ¦ ¬ ~ ^ | \\ ¿ ¡'],
+  ['Отметки', '✓ ✔ ✗ ✘ ★ ☆ ☐ ☑ ☒ ● ○ ■ □ ◆ ◇ ⚠ ❗ ❓ ✉ ☎ ✎ ♥'],
+  ['Валюты', '₴ $ € £ ¥ ₽ ₸ zł Kč ¢ ₿'],
+  ['Греч.', 'α β γ δ ε θ λ μ π ρ σ τ φ ω Δ Σ Ω Φ Π Λ'],
+  ['Индексы', '⁰ ¹ ² ³ ⁴ ⁵ ⁶ ⁷ ⁸ ⁹ ⁺ ⁻ ⁿ ₀ ₁ ₂ ₃ ₄ ₅ ₆ ₇ ₈ ₉ ₊ ₋']
+];
+// Панель символов: вставляет знак в то поле (название/текст), где был курсор
+function symbolBar(fields, getLast) {
+  const bar = h('div', { class: 'symbar' });
+  const draw = () => {
+    const u = uiGet(), ci = clampN(u.symcat, 0, SYM_SETS.length - 1, 0);
+    const keep = e => e.preventDefault(); // фокус и клавиатура остаются на поле
+    bar.replaceChildren(
+      h('div', { class: 'symrow cats' }, SYM_SETS.map(([n], i) => h('button', {
+        type: 'button', class: i === ci ? 'on' : '', onmousedown: keep,
+        onclick() { uiPut({ symcat: i }); draw(); }
+      }, n))),
+      h('div', { class: 'symrow' }, SYM_SETS[ci][1].split(' ').map(ch => h('button', {
+        type: 'button', 'aria-label': 'Вставить ' + ch, onmousedown: keep, ontouchstart() {},
+        onclick() {
+          const f = getLast() || fields[0];
+          f.focus();
+          const a = f.selectionStart == null ? f.value.length : f.selectionStart, b = f.selectionEnd == null ? a : f.selectionEnd;
+          f.setRangeText(ch, a, b, 'end');
+          f.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+      }, ch))));
+  };
+  draw();
+  return bar;
+}
+
 function openEditor(heading, base, tab, onSave) {
   openModal((box, api) => {
     const t = h('input', { class: 'field', type: 'text', maxlength: 200, placeholder: 'Название (необязательно)', value: base.title });
@@ -902,7 +943,11 @@ function openEditor(heading, base, tab, onSave) {
       if (r === 'save') doSave();
       else if (r === 'discard') api.close();
     };
-    box.append(h('h2', { class: 'ed-title', text: heading }), t, x, err, more, extra,
+    let lastField = x;
+    t.addEventListener('focus', () => { lastField = t; });
+    x.addEventListener('focus', () => { lastField = x; });
+    const symBar = uiGet().symbols !== false ? symbolBar([x, t], () => lastField) : null;
+    box.append(h('h2', { class: 'ed-title', text: heading }), t, x, symBar, err, more, extra,
       h('div', { class: 'btns two' },
         btn('Отмена', api.dismiss),
         base.id ? h('button', { class: 'btn icon danger', type: 'button', 'aria-label': 'Удалить шаблон', title: 'Удалить шаблон', onclick() { api.close(); delItem(base.id); } }, '🗑') : null,
@@ -3356,7 +3401,7 @@ function joinSheet() {
 
 /* ---------- оформление и размеры (отдельно для телефона и компьютера; в экспорт не входят) ---------- */
 const UI_KEY = KEY + ':ui';
-const UI_DEFAULTS = { recentN: 10, newFocus: 'text', colfix: true, lockbg: false, theme: 'auto', accent: 'teal', ahue: 0, asat: 0, alight: 0, fs: 17, ch: 72, lines: 3, gap: 10, gfs: 16, gh: 48, width: 720, full: false, colmode: 'off', cols: 2, gridflow: 'row', pvw: 720, pvnw: false, archShow: true };
+const UI_DEFAULTS = { recentN: 10, newFocus: 'text', colfix: true, lockbg: false, theme: 'auto', accent: 'teal', ahue: 0, asat: 0, alight: 0, fs: 17, ch: 72, lines: 3, gap: 10, gfs: 16, gh: 48, width: 720, full: false, colmode: 'off', cols: 2, gridflow: 'row', pvw: 720, pvnw: false, archShow: true, symbols: true, symcat: 0 };
 const THEME_NAMES = { auto: 'Как в системе', light: 'Светлая', dark: 'Тёмная', black: 'Чёрная', sand: 'Песочная', contrast: 'Контрастная' };
 const BASES = {
   light:    { dark: false, bg: '#eff2f0', surface: '#ffffff', ink: '#182022', muted: '#62706f', line: '#d9dfdc', danger: '#b3261e', shadow: '0 6px 20px rgba(13,40,35,.22)' },
@@ -3562,6 +3607,8 @@ function uiSheet() {
       }, h('summary', { text: title }), ...kids);
       const nw = h('input', { type: 'checkbox' }); nw.checked = !!u.pvnw;
       nw.addEventListener('change', () => uiPut({ pvnw: nw.checked }));
+      const sy = h('input', { type: 'checkbox' }); sy.checked = u.symbols !== false;
+      sy.addEventListener('change', () => uiPut({ symbols: sy.checked }));
       const ar = h('input', { type: 'checkbox' }); ar.checked = u.archShow !== false;
       ar.addEventListener('change', () => uiPut({ archShow: ar.checked }));
       box.replaceChildren(
@@ -3611,6 +3658,7 @@ function uiSheet() {
         grp('windows', 'Окна просмотра и правки',
           ...(phone ? [] : [slider('Ширина окна', 'pvw', 480, 1800, 20, px, 'px')]),
           h('label', { class: 'chk' }, nw, h('span', { text: 'Не переносить длинные строки (прокрутка вбок) — удобно для тех. требований' })),
+          h('label', { class: 'chk' }, sy, h('span', { text: 'Панель символов в окне правки шаблона (Ø ° ± × → ✓ …; нажатие вставляет знак там, где курсор)' })),
           h('label', { class: 'chk' }, lock, h('span', { text: 'Фиксировать фон, пока открыто окно (включите, если на телефоне окно дёргается)' }))),
         grp('misc', 'Новый шаблон и архив',
           h('div', { class: 'uilbl', text: 'Новый шаблон' }),

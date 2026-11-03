@@ -180,16 +180,7 @@ const empty = () => ({ active: null, trash: [], tabs: [] });
     const b = await getSt(B); ok(b.tabs[0].items.length === 5, 'добавилась одна копия, остальные не дублируются (' + b.tabs[0].items.length + ')');
   });
 
-  await run('10. уборка точных копий «(другая версия)» через меню', async br => {
-    const A = await newDev(br, 'A', baseA());
-    await setSt(A, st => { const t = st.tabs[0]; t.items.push(it('c1', 'Привет (другая версия)', 'Здравствуйте', 'g1'), it('c2', '(другая версия)', 'корень'), it('c3', 'Пока (другая версия)', 'ДРУГОЙ текст', 'g1')); });
-    await A.page.click('#menu'); await A.page.getByText('GitHub: синхронизация и обновление').click(); await A.page.getByText('Убрать точные копии', { exact: false }).click(); await sleep(200);
-    console.log('dialog:', (await A.page.evaluate(() => document.querySelector('.sheet').innerText)).split('\n').slice(0, 3).join(' | '));
-    await A.page.getByText('Убрать 2', { exact: true }).click(); await sleep(300);
-    const a = await getSt(A), ids = a.tabs[0].items.map(i => i.id);
-    ok(!ids.includes('c1') && !ids.includes('c2') && ids.includes('c3') && ids.includes('a1') && ids.includes('a3'), 'точные копии убраны, отличающаяся копия и оригиналы на месте');
-    ok(a.trash.length === 2, 'копии лежат в корзине');
-  });
+  // сценарий 10 (кнопка уборки копий) снят вместе с кнопкой в версии 2026-10-30.6
 
   console.log(fails ? '\nПРОВАЛЕНО: ' + fails : '\nВСЕ ПРОВЕРКИ ПРОШЛИ');
   process.exit(fails ? 1 : 0);
