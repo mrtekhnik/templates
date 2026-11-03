@@ -479,7 +479,7 @@ body.cols-grid.grid-vert:not(.sortmode) .rowflow{display:grid;grid-auto-flow:col
 
 /* ---------- утилиты ---------- */
 const KEY = 'my-templates-v1';
-const APP_VERSION = '2026-11-03.2';
+const APP_VERSION = '2026-11-03.3';
 const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4);
 const $ = s => document.querySelector(s);
 
@@ -991,7 +991,7 @@ function openEditor(heading, base, tab, onSave) {
       });
     });
     const undoBtn = h('button', {
-      type: 'button', class: 'undob', title: 'Отменить последнее действие (шаг — по настройке: пауза или пробел/знак)', 'aria-label': 'Отменить',
+      type: 'button', class: 'undob', title: 'Отменить последнее действие (шаг — по настройке: пауза или слово)', 'aria-label': 'Отменить',
       onmousedown(e) { e.preventDefault(); },
       onclick() { hist.undo(lastField); }
     }, '↶');
@@ -3709,7 +3709,7 @@ function uiSheet() {
         grp('windows', 'Окна просмотра и правки',
           ...(phone ? [] : [slider('Ширина окна', 'pvw', 480, 1800, 20, px, 'px')]),
           h('div', { class: 'uilbl', text: 'Шаг отмены ↶ в окне правки' }),
-          h('div', { class: 'thm' }, [['pause', 'По паузе (0,6 с)'], ['word', 'По пробелу и знаку']].map(([k, n]) =>
+          h('div', { class: 'thm' }, [['pause', 'По паузе (0,6 с)'], ['word', 'По слову (пробел, знак)']].map(([k, n]) =>
             btn(n, () => { uiPut({ undoMode: k }); draw(); }, (u.undoMode === 'word' ? 'word' : 'pause') === k ? 'primary' : ''))),
           h('label', { class: 'chk' }, nw, h('span', { text: 'Не переносить длинные строки (прокрутка вбок) — удобно для тех. требований' })),
           h('label', { class: 'chk' }, sy, h('span', { text: 'Панель символов в окне правки шаблона (Ø ° ± × → ✓ …; нажатие вставляет знак там, где курсор)' })),
