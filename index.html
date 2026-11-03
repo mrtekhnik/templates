@@ -189,7 +189,8 @@ button{font:inherit;color:inherit;cursor:pointer}
 .sheet.editor .area{min-height:96px}
 .edtools{flex:none;display:flex;gap:6px;align-items:stretch;min-width:0}
 .edtools .symbar{flex:1}
-.undob{flex:none;width:44px;min-height:38px;border-radius:10px;border:1px solid var(--line);background:var(--surface);color:var(--ink);font-size:22px;line-height:1;padding:0}
+.undocol{flex:none;display:flex;gap:4px;align-items:stretch}
+.undob{flex:none;width:40px;min-height:38px;border-radius:10px;border:1px solid var(--line);background:var(--surface);color:var(--ink);font-size:22px;line-height:1;padding:0}
 .undob:disabled{opacity:.35}
 .symbar{flex:none;display:flex;flex-direction:column;gap:4px;min-width:0}
 .symrow{display:flex;gap:4px;overflow-x:auto;scrollbar-width:none;padding-bottom:1px}
@@ -479,7 +480,7 @@ body.cols-grid.grid-vert:not(.sortmode) .rowflow{display:grid;grid-auto-flow:col
 
 /* ---------- утилиты ---------- */
 const KEY = 'my-templates-v1';
-const APP_VERSION = '2026-11-03.4';
+const APP_VERSION = '2026-11-03.5';
 const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4);
 const $ = s => document.querySelector(s);
 
@@ -952,7 +953,8 @@ function openEditor(heading, base, tab, onSave) {
     // собственная история отмены: шаг = пауза в наборе ~0,6 с (по умолчанию) или пробел/знак препинания
     const hist = (() => {
       const st = new Map(), timers = new Map();
-      [x, t].forEach(f => st.set(f, [{ v: f.value, c: f.value.length }]));
+      const rd = new Map(); // стек «вперёд»
+      [x, t].forEach(f => { st.set(f, [{ v: f.value, c: f.value.length }]); rd.set(f, []); });
       const top = f => { const a = st.get(f); return a[a.length - 1]; };
       const pending = f => f.value !== top(f).v;
       const commit = f => {
@@ -961,15 +963,28 @@ function openEditor(heading, base, tab, onSave) {
         refresh();
       };
       const can = f => pending(f) || st.get(f).length > 1;
+      const caret = f => (f.selectionStart == null ? f.value.length : f.selectionStart);
+      const setTo = (f, e) => { f.value = e.v; f.focus(); try { f.setSelectionRange(e.c, e.c); } catch (er) {} };
       const undo = f => {
         clearTimeout(timers.get(f));
-        if (!pending(f)) { if (st.get(f).length < 2) return; st.get(f).pop(); }
-        const e = top(f);
-        f.value = e.v; f.focus(); try { f.setSelectionRange(e.c, e.c); } catch (er) {}
+        if (!pending(f) && st.get(f).length < 2) return;
+        rd.get(f).push({ v: f.value, c: caret(f) }); // то, что уходит, можно вернуть кнопкой «вперёд»
+        if (!pending(f)) st.get(f).pop();
+        setTo(f, top(f));
+        refresh();
+      };
+      const redo = f => {
+        clearTimeout(timers.get(f));
+        if (!rd.get(f).length) return;
+        commit(f); // несохранённый набор не теряем (обычно его тут нет)
+        const e = rd.get(f).pop();
+        st.get(f).push({ v: e.v, c: e.c });
+        setTo(f, e);
         refresh();
       };
       const BOUND = /[\s.,;:!?…)»”"\]]/;
       const onInput = (f, e) => {
+        rd.get(f).length = 0; // новый набор обнуляет «вперёд»
         const mode = uiGet().undoMode;
         if (mode === 'word' || mode === 'sentence') {
           const c = f.selectionStart == null ? f.value.length : f.selectionStart;
@@ -984,25 +999,33 @@ function openEditor(heading, base, tab, onSave) {
         }
         refresh();
       };
-      let btnEl = null;
-      const refresh = () => { if (btnEl) btnEl.disabled = !can(lastField); };
-      return { commit, undo, onInput, can, refresh, bind(b) { btnEl = b; } };
+      let btnEl = null, rdEl = null;
+      const refresh = () => { if (btnEl) btnEl.disabled = !can(lastField); if (rdEl) rdEl.disabled = !rd.get(lastField).length; };
+      return { commit, undo, redo, onInput, can, refresh, bind(b, r) { btnEl = b; rdEl = r; } };
     })();
     [t, x].forEach(f => {
       f.addEventListener('focus', () => { hist.commit(lastField); lastField = f; hist.refresh(); });
       f.addEventListener('input', e => hist.onInput(f, e));
       f.addEventListener('keydown', e => {
-        if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && (e.key === 'z' || e.key === 'Z' || e.key === 'я' || e.key === 'Я')) { e.preventDefault(); hist.undo(f); }
+        if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+        const k = e.key.toLowerCase();
+        if ((k === 'z' || k === 'я') && !e.shiftKey) { e.preventDefault(); hist.undo(f); }
+        else if (k === 'y' || k === 'н' || ((k === 'z' || k === 'я') && e.shiftKey)) { e.preventDefault(); hist.redo(f); }
       });
     });
     const undoBtn = h('button', {
-      type: 'button', class: 'undob', title: 'Отменить последнее действие (шаг — по настройке: серия набора, слово или предложение)', 'aria-label': 'Отменить',
+      type: 'button', class: 'undob', title: 'Отменить последнее действие (шаг — по настройке: серия набора, слово или предложение). Вперёд — кнопка ↷ рядом', 'aria-label': 'Отменить',
       onmousedown(e) { e.preventDefault(); },
       onclick() { hist.undo(lastField); }
     }, '↶');
-    hist.bind(undoBtn); hist.refresh();
+    const redoBtn = h('button', {
+      type: 'button', class: 'undob', title: 'Вернуть отменённое (вперёд)', 'aria-label': 'Вернуть',
+      onmousedown(e) { e.preventDefault(); },
+      onclick() { hist.redo(lastField); }
+    }, '↷');
+    hist.bind(undoBtn, redoBtn); hist.refresh();
     const symBar = uiGet().symbols !== false ? symbolBar([x, t], () => lastField, hist) : null;
-    const edTools = h('div', { class: 'edtools' }, undoBtn, symBar);
+    const edTools = h('div', { class: 'edtools' }, h('div', { class: 'undocol' }, undoBtn, redoBtn), symBar);
     box.append(h('h2', { class: 'ed-title', text: heading }), t, x, edTools, err, more, extra,
       h('div', { class: 'btns two' },
         btn('Отмена', api.dismiss),

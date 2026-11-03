@@ -1,0 +1,33 @@
+const { chromium } = require('playwright');
+(async () => {
+  const b = await chromium.launch(); const ctx = await b.newContext({ viewport: { width: 420, height: 800 } });
+  const p = await ctx.newPage(); const errs = []; let fails = 0;
+  p.on('pageerror', e => errs.push(e.message));
+  const ok = (c, m) => { console.log((c ? 'PASS ' : 'FAIL ') + m); if (!c) fails++; };
+  const val = () => p.inputValue('textarea.area');
+  const btns = () => p.locator('.undob');
+  await p.goto('http://localhost:8770/index.html'); await p.waitForTimeout(500);
+  await p.click('#add'); await p.waitForSelector('.undob');
+  ok(await btns().nth(1).isDisabled(), 'вперёд серая в начале');
+  await p.click('textarea.area');
+  await p.keyboard.type('Привет'); await p.waitForTimeout(800);
+  await p.keyboard.type(' мир'); await p.waitForTimeout(800);
+  await p.keyboard.type('!');
+  await btns().nth(0).click(); await btns().nth(0).click();
+  ok(await val() === 'Привет', 'после двух отмен: ' + await val());
+  ok(!(await btns().nth(1).isDisabled()), 'вперёд активна');
+  await btns().nth(1).click(); ok(await val() === 'Привет мир', 'вперёд 1: ' + await val());
+  await btns().nth(1).click(); ok(await val() === 'Привет мир!', 'вперёд 2 (несохранённый хвост вернулся): ' + await val());
+  ok(await btns().nth(1).isDisabled(), 'вперёд серая, когда нечего возвращать');
+  await p.keyboard.press('Control+z'); await p.keyboard.press('Control+z'); ok(await val() === 'Привет', 'Ctrl+Z x2: ' + await val());
+  await p.keyboard.press('Control+y'); ok(await val() === 'Привет мир', 'Ctrl+Y: ' + await val());
+  await p.keyboard.press('Control+Shift+z'); ok(await val() === 'Привет мир!', 'Ctrl+Shift+Z: ' + await val());
+  // новый набор сбрасывает «вперёд»
+  await btns().nth(0).click(); await btns().nth(0).click();
+  await p.keyboard.type(' друг');
+  ok(await btns().nth(1).isDisabled(), 'после нового набора вперёд сброшена');
+  ok(await val() === 'Привет друг', 'текст: ' + await val());
+  await p.screenshot({ path: '/tmp/gm/redo1.png' });
+  console.log('errors:', errs); console.log(fails ? 'ПРОВАЛЕНО ' + fails : 'ВСЕ ПРОШЛИ');
+  await b.close(); process.exit(fails ? 1 : 0);
+})();
