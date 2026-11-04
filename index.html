@@ -484,7 +484,7 @@ body.cols-grid.grid-vert:not(.sortmode) .rowflow{display:grid;grid-auto-flow:col
 
 /* ---------- утилиты ---------- */
 const KEY = 'my-templates-v1';
-const APP_VERSION = '2026-11-04.5';
+const APP_VERSION = '2026-11-04.6';
 const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4);
 const $ = s => document.querySelector(s);
 
@@ -600,7 +600,7 @@ function normalize(d) {
   const active = tabs.some(t => t.id === d.active) ? d.active : (tabs[0] ? tabs[0].id : null);
   const trash = (Array.isArray(d.trash) ? d.trash : []).map(normTrash).filter(Boolean);
   const ro = isObj(d.recentOpen) ? d.recentOpen : {};
-  return { tabs, active, trash, special: !!d.special, recentOpen: { created: !!ro.created, edited: !!ro.edited } };
+  return { tabs, active, trash, special: !!d.special, recentOpen: { created: !!ro.created, edited: !!ro.edited, freq: ro.freq !== false } };
 }
 
 function seed() {
@@ -743,12 +743,28 @@ function toastUndo(msg, snap) {
   }, 6500);
 }
 
+/* ---------- счётчик копирований: «часто используемые» (хранится только на этом устройстве, в синхронизацию не входит) ---------- */
+const USE_KEY = KEY + ':use', FREQ_MIN = 2;
+let useMap = null;
+const useRead = () => { if (!useMap) { try { useMap = JSON.parse(localStorage.getItem(USE_KEY)) || {}; } catch (e) { useMap = {}; } } return useMap; };
+const useWrite = () => { try { localStorage.setItem(USE_KEY, JSON.stringify(useMap || {})); } catch (e) { /* нет места — счётчик не критичен */ } };
+function useBump(id) { const m = useRead(), e = m[id] || { n: 0, t: 0 }; e.n++; e.t = Date.now(); m[id] = e; useWrite(); }
+// убрать счётчики шаблонов, которых больше нет (ни в базе, ни в корзине)
+function usePrune() {
+  const m = useRead(), keys = Object.keys(m); if (!keys.length) return;
+  const have = new Set();
+  state.tabs.forEach(t => t.items.forEach(i => have.add(i.id)));
+  state.trash.forEach(e => { if (e.item) have.add(e.item.id); (e.items || []).forEach(i => have.add(i.id)); if (e.tab) (e.tab.items || []).forEach(i => have.add(i.id)); });
+  let ch = false; keys.forEach(k => { if (!have.has(k)) { delete m[k]; ch = true; } });
+  if (ch) useWrite();
+}
 async function copyItem(item, card) {
   if (!item.text) { toast('В шаблоне нет текста', true); return; }
   const out = await prepareTexts([item.text]);
   if (!out) return;                                   // отменили ввод полей
   const ok = await copyText(out[0]);
   if (ok) {
+    try { useBump(item.id); } catch (e) { /* счётчик не должен мешать копированию */ }
     toast('✓ Скопировано');
     card.classList.add('flash');
     setTimeout(() => card.classList.remove('flash'), 900);
@@ -1451,13 +1467,17 @@ function renderSpecial(box) {
     list.forEach(x => box.append(row(x.it, crumbOf(x))));
   };
   const pinned = live.filter(x => x.it.pin && match(x.it)).sort((a, b) => a.it.pin - b.it.pin);
+  usePrune();
+  const FREQ_N = Math.round(clampN(uiGet().freqN, 0, 30, 10)), um = useRead();
+  const freq = FREQ_N ? live.filter(x => um[x.it.id] && um[x.it.id].n >= FREQ_MIN && match(x.it))
+    .sort((a, b) => (um[b.it.id].n - um[a.it.id].n) || (um[b.it.id].t - um[a.it.id].t)).slice(0, FREQ_N) : [];
   const created = live.filter(x => x.it.cr && match(x.it)).sort((a, b) => b.it.cr - a.it.cr).slice(0, RECENT_N);
   const edited = live.filter(x => x.it.mod && x.it.mod > (x.it.cr || 0) + 1000 && match(x.it)).sort((a, b) => b.it.mod - a.it.mod).slice(0, RECENT_N);
   section('★ Избранное', pinned.length ? String(pinned.length) : '', pinned,
     q ? 'Ничего не найдено' : 'Пока пусто. Откройте «⋯» у шаблона → «Добавить во вкладку ★».');
   // недавние — выпадающие списки; открыт/закрыт запоминается (как у папок); при поиске раскрываются сами
-  const ro = state.recentOpen || (state.recentOpen = { created: false, edited: false });
-  const fold = (key, title, list, emptyText) => {
+  const ro = state.recentOpen || (state.recentOpen = { created: false, edited: false, freq: true });
+  const fold = (key, title, list, emptyText, crumbFn) => {
     const open = !!q || !!ro[key];
     box.append(h('button', {
       class: 'sectoggle', type: 'button', 'aria-expanded': String(open),
@@ -1465,8 +1485,11 @@ function renderSpecial(box) {
     }, h('span', { class: 'chev', text: open ? '▾' : '▸' }), h('span', { text: title }), h('small', { text: String(list.length) })));
     if (!open) return;
     if (!list.length) { box.append(h('p', { class: 'gempty', text: emptyText })); return; }
-    list.forEach(x => box.append(row(x.it, crumbOf(x))));
+    list.forEach(x => box.append(row(x.it, crumbFn ? crumbFn(x) : crumbOf(x))));
   };
+  if (FREQ_N) fold('freq', 'Часто используемые', freq,
+    q ? 'Ничего не найдено' : 'Пока пусто: сюда попадают шаблоны, скопированные не меньше ' + FREQ_MIN + ' раз на этом устройстве.',
+    x => crumbOf(x) + ' · ×' + um[x.it.id].n);
   fold('created', 'Недавние: созданные', created,
     q ? 'Ничего не найдено' : 'Пока пусто: появятся шаблоны, созданные начиная с этой версии.');
   fold('edited', 'Недавние: изменённые', edited,
@@ -3148,7 +3171,7 @@ function storageInfo() {
   return { all, mine, rows, pct: Math.min(100, Math.round(all * 100 / LS_LIMIT)) };
 }
 const mb = n => (n < 1048576 ? Math.max(0, Math.round(n / 1024)) + ' КБ' : (n / 1048576).toFixed(1).replace('.', ',') + ' МБ');
-const KEY_NAMES = { [KEY]: 'Мои шаблоны — база', [KEY + ':meta']: 'Мои шаблоны — настройки', [KEY + ':ui']: 'Мои шаблоны — оформление', [KEY + ':sync']: 'Мои шаблоны — синхронизация', [KEY + ':backup']: 'Мои шаблоны — копия перед импортом', [KEY + ':auto']: 'Мои шаблоны — автокопии' };
+const KEY_NAMES = { [KEY]: 'Мои шаблоны — база', [KEY + ':meta']: 'Мои шаблоны — настройки', [KEY + ':ui']: 'Мои шаблоны — оформление', [KEY + ':sync']: 'Мои шаблоны — синхронизация', [KEY + ':backup']: 'Мои шаблоны — копия перед импортом', [KEY + ':auto']: 'Мои шаблоны — автокопии', [KEY + ':use']: 'Мои шаблоны — счётчики копирований' };
 function storageSheet() {
   openModal((box, api) => {
     const c = countRecords(), si = storageInfo();
@@ -3608,7 +3631,7 @@ function joinSheet() {
 
 /* ---------- оформление и размеры (отдельно для телефона и компьютера; в экспорт не входят) ---------- */
 const UI_KEY = KEY + ':ui';
-const UI_DEFAULTS = { recentN: 10, newFocus: 'text', colfix: true, lockbg: false, theme: 'auto', accent: 'teal', ahue: 0, asat: 0, alight: 0, fs: 17, ch: 72, lines: 3, gap: 10, gfs: 16, gh: 48, width: 720, full: false, colmode: 'off', cols: 2, gridflow: 'row', pvw: 720, pvnw: false, archShow: true, symbols: true, symcat: 0, undoMode: 'pause' };
+const UI_DEFAULTS = { recentN: 10, freqN: 10, newFocus: 'text', colfix: true, lockbg: false, theme: 'auto', accent: 'teal', ahue: 0, asat: 0, alight: 0, fs: 17, ch: 72, lines: 3, gap: 10, gfs: 16, gh: 48, width: 720, full: false, colmode: 'off', cols: 2, gridflow: 'row', pvw: 720, pvnw: false, archShow: true, symbols: true, symcat: 0, undoMode: 'pause' };
 const THEME_NAMES = { auto: 'Как в системе', light: 'Светлая', dark: 'Тёмная', black: 'Чёрная', sand: 'Песочная', contrast: 'Контрастная' };
 const BASES = {
   light:    { dark: false, bg: '#eff2f0', surface: '#ffffff', ink: '#182022', muted: '#62706f', line: '#d9dfdc', danger: '#b3261e', shadow: '0 6px 20px rgba(13,40,35,.22)' },
@@ -3846,7 +3869,12 @@ function uiSheet() {
           slider('Размер шрифта', 'gfs', 12, 28, 1, px, 'px'),
           slider('Высота заголовка', 'gh', 32, 80, 2, px, 'px')),
         grp('star', 'Вкладка ★',
-          slider('Сколько недавних показывать', 'recentN', 3, 50, 1, plain, '')),
+          slider('Сколько недавних показывать', 'recentN', 3, 50, 1, plain, ''),
+          slider('Сколько частых показывать (0 — скрыть)', 'freqN', 0, 30, 1, plain, ''),
+          btn('Сбросить счётчики копирований', async () => {
+            const r = await confirmDialog({ title: 'Сбросить счётчики?', message: 'Список «Часто используемые» начнёт заполняться заново. Сами шаблоны не изменятся. Счётчики хранятся только на этом устройстве.', buttons: [{ label: 'Сбросить', value: 'yes', kind: 'danger' }, { label: 'Отмена', value: 'no' }], cancelValue: 'no' });
+            if (r === 'yes') { useMap = {}; useWrite(); renderList(); toast('Счётчики сброшены'); }
+          })),
         ...(phone ? [] : [
           grp('layout', 'Ширина и колонки (компьютер)',
             h('label', { class: 'chk' }, full, h('span', { text: 'Рабочая часть во всю ширину окна' })),
