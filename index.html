@@ -484,7 +484,7 @@ body.cols-grid.grid-vert:not(.sortmode) .rowflow{display:grid;grid-auto-flow:col
 
 /* ---------- утилиты ---------- */
 const KEY = 'my-templates-v1';
-const APP_VERSION = '2026-11-04.4';
+const APP_VERSION = '2026-11-04.5';
 const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4);
 const $ = s => document.querySelector(s);
 
@@ -913,7 +913,7 @@ function openEditor(heading, base, tab, onSave) {
     const extra = h('div', { class: 'ed-extra', hidden: true },
       h('label', { class: 'lbl', text: 'Группа' }), sel,
       h('label', { class: 'chk' }, chk, h('span', { text: 'В строку с предыдущим (до ' + MAX_ROW + ' в строке)' })), chkHint,
-      h('p', { class: 'tmeta', style: 'margin:2px 0 0', text: 'В тексте можно писать {дата}, {время}, {?Поле} — при копировании подставится или спросится (меню ⋮ → «Подстановки»).' }));
+      h('p', { class: 'tmeta', style: 'margin:2px 0 0', text: 'В тексте можно писать {дата}, {время}, {?Поле}, {?Поле|вариант1|вариант2} — при копировании подставится или спросится (Меню → Ещё… → «Подстановки»).' }));
     const more = h('button', { class: 'ed-more', type: 'button', onclick() { extra.hidden = !extra.hidden; refreshMore(); } });
     const refreshMore = () => {
       const gid = curGroup(), g = gid ? gById(tab, gid) : null;
@@ -3340,8 +3340,9 @@ function autoSheet() {
 /* ---------- подстановки в тексте: {дата}, {время}, {?Поле} ---------- */
 // Автоматические: {дата} {дата+7} {дата-1} {время} {год} {месяц} {число} {день недели}.
 // Поля: {?Имя} или {?Имя=по умолчанию} — перед копированием приложение спросит значение.
+// Список: {?Имя|вариант1|*вариант2|вариант3} — выбор из вариантов (* — выбран заранее, \| — сама черта).
 // Любые другие фигурные скобки остаются в тексте как есть.
-const TOKEN_RE = /\{(\?)?([^{}\n]{1,80})\}/g;
+const TOKEN_RE = /\{(\?)?([^{}\n]{1,400})\}/g;
 const WEEKDAYS = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота'];
 const MONTHS = ['январь', 'февраль', 'март', 'апрель', 'май', 'июнь', 'июль', 'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь'];
 const MONTHS_GEN = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
@@ -3384,6 +3385,21 @@ function unknownTokens(texts) {
   return out;
 }
 function parseField(body) {
+  const parts = body.split(/(?<!\\)\|/);
+  // список вариантов: имя без «=» и хотя бы один вариант; запись {?Имя=а|б} как раньше — значение по умолчанию «а|б»
+  if (parts.length > 1 && !parts[0].includes('=') && parts[0].trim()) {
+    const un = x => x.replace(/\\\|/g, '|');
+    let def = '';
+    const opts = [];
+    parts.slice(1).forEach(raw => {
+      let t = raw.trim(), star = false;
+      if (t.startsWith('*')) { star = true; t = t.slice(1).trim(); }
+      t = un(t);
+      if (!t || opts.includes(t)) return;
+      opts.push(t); if (star && !def) def = t;
+    });
+    if (opts.length) return { name: parts[0].trim(), def, opts };
+  }
   const i = body.indexOf('=');
   return i < 0 ? { name: body.trim(), def: '' } : { name: body.slice(0, i).trim(), def: body.slice(i + 1) };
 }
@@ -3393,7 +3409,12 @@ function hasSubst(text) {
 }
 function collectFields(texts) {
   const seen = new Map();
-  texts.forEach(t => { for (const m of t.matchAll(TOKEN_RE)) { if (m[1]) { const f = parseField(m[2]); if (f.name && !seen.has(f.name)) seen.set(f.name, f); } } });
+  texts.forEach(t => { for (const m of t.matchAll(TOKEN_RE)) { if (m[1]) {
+    const f = parseField(m[2]); if (!f.name) continue;
+    const old = seen.get(f.name);
+    if (!old) seen.set(f.name, f);
+    else if (!old.opts && f.opts) seen.set(f.name, f);          // варианты, заданные в одном из мест, действуют для всех
+  } } });
   return [...seen.values()];
 }
 function expandText(t, values) {
@@ -3409,20 +3430,49 @@ function fieldsDialog(fields) {
     const mem = readMeta().fieldMem || {};
     openModal((box, api) => {
       api.dismiss = () => { api.close(); resolve(null); };
-      const inputs = fields.map(f => h('input', { class: 'field', type: 'search', autocomplete: 'off', enterkeyhint: 'done', 'aria-label': f.name, placeholder: f.name, value: f.def || mem[f.name] || '' }));
+      const single = fields.length === 1 && !!fields[0].opts;     // одно поле со списком: нажатие на вариант сразу копирует
+      let finish = () => {};
+      const ctl = fields.map((f, i) => {
+        const next = () => { if (i < fields.length - 1) { const n = ctl[i + 1]; n.focus && n.focus(); } else finish(); };
+        if (!f.opts) {
+          const inp = h('input', { class: 'field', type: 'search', autocomplete: 'off', enterkeyhint: 'done', 'aria-label': f.name, placeholder: f.name, value: f.def || mem[f.name] || '' });
+          inp.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); next(); } });
+          return { f, nodes: [inp], get: () => inp.value, focus: () => { inp.focus(); inp.select(); } };
+        }
+        // поле со списком: до 6 вариантов кнопками, больше — выпадающим списком; всегда можно ввести своё
+        const remembered = mem[f.name];
+        let cur = remembered != null && f.opts.includes(remembered) ? remembered : f.def || '';
+        const other = h('input', { class: 'field', type: 'search', autocomplete: 'off', enterkeyhint: 'done', placeholder: 'Другое…', 'aria-label': f.name + ': своё значение',
+          value: remembered != null && remembered !== '' && !f.opts.includes(remembered) && !f.def ? remembered : '' });
+        let mark = () => {};
+        if (f.opts.length <= 6) {
+          const bs = f.opts.map(o => btn(o, () => { cur = o; other.value = ''; mark(); if (single) finish(); }));
+          mark = () => bs.forEach((b, k) => b.classList.toggle('primary', !other.value && f.opts[k] === cur));
+          mark();
+          other.addEventListener('input', mark);
+          other.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); next(); } });
+          return { f, nodes: [h('div', { class: 'thm' }, bs), other], get: () => (other.value ? other.value : cur), focus: () => bs[0].focus() };
+        }
+        const sel = h('select', { class: 'field', 'aria-label': f.name }, h('option', { value: '' }, '— выберите —'), f.opts.map(o => h('option', { value: o }, o)));
+        sel.value = f.opts.includes(cur) ? cur : '';
+        sel.addEventListener('change', () => { cur = sel.value; if (sel.value) other.value = ''; });
+        other.addEventListener('input', () => { if (other.value) sel.value = ''; });
+        other.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); next(); } });
+        return { f, nodes: [sel, other], get: () => (other.value ? other.value : sel.value), focus: () => sel.focus() };
+      });
       const done = () => {
         const vals = {}, m = readMeta(); m.fieldMem = m.fieldMem || {};
-        fields.forEach((f, i) => { vals[f.name] = inputs[i].value; m.fieldMem[f.name] = inputs[i].value; });
+        ctl.forEach(c => { const v = c.get(); vals[c.f.name] = v; m.fieldMem[c.f.name] = v; });
         writeMeta(m); api.close(); resolve(vals);
       };
-      inputs.forEach((inp, i) => inp.addEventListener('keydown', e => {
-        if (e.key !== 'Enter') return;
-        e.preventDefault(); if (i < inputs.length - 1) inputs[i + 1].focus(); else done();
-      }));
+      finish = done;
+      box.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.tagName === 'SELECT') { e.preventDefault(); done(); } });
       box.append(h('h2', { text: 'Заполните поля' }),
-        ...fields.flatMap((f, i) => [h('label', { class: 'lbl', text: f.name }), inputs[i]]),
+        ...ctl.flatMap(c => [h('label', { class: 'lbl', text: c.f.name }), ...c.nodes]),
         h('div', { class: 'btns', style: 'margin-top:12px' }, btn('Копировать', done, 'primary'), btn('Отмена', api.dismiss, 'ghost')));
-      setTimeout(() => { inputs[0].focus(); inputs[0].select(); }, 30);
+      const first = ctl[0];
+      // на телефоне клавиатуру без нужды не открываем: фокус — только на поле ввода
+      setTimeout(() => { if (!first.f.opts) first.focus(); }, 30);
     });
   });
 }
@@ -3465,6 +3515,7 @@ function substSheet() {
       h('ul', { class: 'pvmeta', style: 'margin:0 0 10px 18px;padding:0' },
         h('li', {}, exBtn('{?Имя}'), ' — спросит «Имя»'),
         h('li', {}, exBtn('{?Имя=Иван}'), ' — подставит «Иван», если не менять'),
+        h('li', {}, exBtn('{?Статус|*В работе|Согласовано|Отклонено}'), ' — выбор из списка: до 6 вариантов кнопками, больше — выпадающим списком; «*» — выбран заранее; можно ввести и своё. Если поле одно, нажатие на вариант сразу копирует. Сама черта в варианте — «\\|»'),
         h('li', {}, 'одинаковое поле, повторённое в тексте, спрашивается один раз; последнее введённое значение запоминается')),
       h('p', { class: 'msg', text: 'Любые другие скобки (например, в коде или JSON) остаются в тексте как есть. Допустимы также {сегодня}, {завтра}, {вчера}, {дата текстом}, {дата кратко}; регистр и «ё» не важны.' }),
       h('div', { class: 'uilbl', text: 'Проверка' }),
