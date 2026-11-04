@@ -484,7 +484,7 @@ body.cols-grid.grid-vert:not(.sortmode) .rowflow{display:grid;grid-auto-flow:col
 
 /* ---------- утилиты ---------- */
 const KEY = 'my-templates-v1';
-const APP_VERSION = '2026-11-04.3';
+const APP_VERSION = '2026-11-04.4';
 const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4);
 const $ = s => document.querySelector(s);
 
@@ -3492,44 +3492,62 @@ function selectionItems(mode) {
   if (mode === 'list') res.sort((a, b) => (state.tabs.indexOf(a.tab) - state.tabs.indexOf(b.tab)) || (a.tab.items.indexOf(a.it) - b.tab.items.indexOf(b.it)));
   return res;
 }
+const JOIN_NUMS = { none: ['Без номеров', null], dot: ['1.', n => n + '. '], paren: ['1)', n => n + ') '], round: ['(1)', n => '(' + n + ') '] };
 function joinSheet() {
-  const prefs = { sep: 'blank', titles: false, order: 'picked', ...(readMeta().joinPrefs || {}) };
+  const prefs = { sep: 'blank', titles: false, order: 'picked', num: 'none', ...(readMeta().joinPrefs || {}), start: 1 };   // «начать с» не запоминается: каждый раз с 1
+  if (!JOIN_NUMS[prefs.num]) prefs.num = 'none';
+  // порядок склейки: начальный — по настройке «Порядок», дальше его можно менять стрелками
+  let ids = selectionItems(prefs.order).map(x => x.it.id);
   openModal((box, api) => {
-    const build = (values) => {
-      const items = selectionItems(prefs.order).map(x => x.it);
-      const sep = (JOIN_SEPS[prefs.sep] || JOIN_SEPS.blank)[1];
-      return { items, text: items.map(it => (prefs.titles && it.title ? it.title + '\n' : '') + (substOn() ? expandText(it.text, values || {}) : it.text)).join(sep) };
-    };
+    const itemsNow = () => ids.map(id => { const l = locate(id); return l && l.it; }).filter(Boolean);
+    const sepOf = () => (JOIN_SEPS[prefs.sep] || JOIN_SEPS.blank)[1];
+    const numOf = i => { const f = JOIN_NUMS[prefs.num][1]; return f ? f(prefs.start + i) : ''; };
+    const assemble = (items, texts) => items.map((it, i) =>
+      numOf(i) + (prefs.titles && it.title ? it.title + '\n' : '') + texts[i]).join(sepOf());
+    const keepPrefs = () => { const m = readMeta(); m.joinPrefs = { sep: prefs.sep, titles: prefs.titles, order: prefs.order, num: prefs.num }; writeMeta(m); };
+    const label = it => { const t = (it.title || it.text || '').replace(/\s+/g, ' ').trim(); return t.length > 48 ? t.slice(0, 48) + '…' : (t || '(пусто)'); };
     const draw = () => {
-      const r = build(null);
-      const keep = () => { const m = readMeta(); m.joinPrefs = { ...prefs }; writeMeta(m); draw(); };
+      const items = itemsNow();
+      const texts = items.map(it => (substOn() ? expandText(it.text, {}) : it.text));
+      const full = assemble(items, texts);
+      const keep = () => { keepPrefs(); draw(); };
       const titles = h('input', { type: 'checkbox' }); titles.checked = prefs.titles;
       titles.addEventListener('change', () => { prefs.titles = titles.checked; keep(); });
-      const snip = r.text.length > 260 ? r.text.slice(0, 260) + '…' : r.text;
+      const start = h('input', { class: 'field', type: 'number', inputmode: 'numeric', min: 0, max: 9999, value: prefs.start, 'aria-label': 'Начать с номера', style: 'width:90px;min-height:44px' });
+      start.addEventListener('change', () => { prefs.start = Math.max(0, Math.min(9999, parseInt(start.value, 10) || 1)); keep(); });
+      const mv = (i, d) => { const j = i + d; if (j < 0 || j >= ids.length) return; [ids[i], ids[j]] = [ids[j], ids[i]]; draw(); };
+      const rows = items.map((it, i) => h('div', { class: 'trow' },
+        h('span', { class: 'tn', style: 'font-weight:500', text: (numOf(i) || (i + 1) + '. ') + label(it) }),
+        h('button', { class: 'ic', type: 'button', 'aria-label': 'Выше', disabled: i === 0, onclick() { mv(i, -1); } }, '↑'),
+        h('button', { class: 'ic', type: 'button', 'aria-label': 'Ниже', disabled: i === items.length - 1, onclick() { mv(i, 1); } }, '↓'),
+        h('button', { class: 'ic', type: 'button', 'aria-label': 'Убрать из склейки', onclick() { ids.splice(i, 1); draw(); } }, '✕')));
       box.replaceChildren(
         h('h2', { text: 'Склеить и скопировать' }),
-        h('p', { class: 'msg', text: 'Шаблонов: ' + r.items.length + ', символов: ' + r.text.length }),
+        h('p', { class: 'msg', text: 'Шаблонов: ' + items.length + ', символов: ' + full.length }),
+        h('div', { class: 'uilbl', text: 'Порядок (стрелками можно поменять, ✕ — убрать из склейки)' }),
+        h('div', { class: 'thm' },
+          btn('Как выбирали', () => { prefs.order = 'picked'; ids = selectionItems('picked').map(x => x.it.id); keep(); }, prefs.order === 'picked' ? 'primary' : ''),
+          btn('Как в базе', () => { prefs.order = 'list'; ids = selectionItems('list').map(x => x.it.id); keep(); }, prefs.order === 'list' ? 'primary' : '')),
+        h('div', { style: 'margin:6px 0 10px' }, rows.length ? rows : h('p', { class: 'msg', text: 'Ничего не выбрано.' })),
+        h('div', { class: 'uilbl', text: 'Нумерация' }),
+        h('div', { class: 'thm' }, Object.entries(JOIN_NUMS).map(([k, [n]]) => btn(n, () => { prefs.num = k; keep(); }, prefs.num === k ? 'primary' : ''))),
+        prefs.num !== 'none' ? h('label', { class: 'chk' }, h('span', { text: 'Начать с номера' }), start) : '',
         h('div', { class: 'uilbl', text: 'Разделитель' }),
         h('div', { class: 'thm' }, Object.entries(JOIN_SEPS).map(([k, [n]]) => btn(n, () => { prefs.sep = k; keep(); }, prefs.sep === k ? 'primary' : ''))),
-        h('div', { class: 'uilbl', text: 'Порядок' }),
-        h('div', { class: 'thm' },
-          btn('Как выбирали', () => { prefs.order = 'picked'; keep(); }, prefs.order === 'picked' ? 'primary' : ''),
-          btn('Как в базе', () => { prefs.order = 'list'; keep(); }, prefs.order === 'list' ? 'primary' : '')),
         h('label', { class: 'chk' }, titles, h('span', { text: 'Добавлять название над текстом' })),
         h('div', { class: 'uilbl', text: 'Предпросмотр' }),
-        h('pre', { class: 'pv', text: snip || '(пусто)' }),
+        h('pre', { class: 'pv', text: full || '(пусто)' }),
         h('div', { class: 'btns', style: 'margin-top:10px' },
           btn('Копировать', async () => {
-            const items = build(null).items;
-            const texts = items.map(it => it.text);
-            const out = await prepareTexts(texts);           // поля спрашиваются один раз на всё
+            const its = itemsNow();
+            if (!its.length) { toast('Нечего копировать', true); return; }
+            const out = await prepareTexts(its.map(it => it.text));        // поля спрашиваются один раз на всё
             if (!out) return;
-            const sepStr = (JOIN_SEPS[prefs.sep] || JOIN_SEPS.blank)[1];
-            const full = items.map((it, i) => (prefs.titles && it.title ? it.title + '\n' : '') + out[i]).join(sepStr);
-            const ok = await copyText(full);
+            const text = assemble(its, out);
+            const ok = await copyText(text);
             api.close();
             if (ok) { selMode = false; sel.clear(); renderList(); }
-            toast(ok ? '✓ Скопировано: ' + items.length + ' шт., ' + full.length + ' симв.' : 'Не удалось скопировать', !ok);
+            toast(ok ? '✓ Скопировано: ' + its.length + ' шт., ' + text.length + ' симв.' : 'Не удалось скопировать', !ok);
           }, 'primary'),
           btn('Отмена', () => api.close(), 'ghost')));
     };
