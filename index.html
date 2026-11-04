@@ -482,7 +482,7 @@ body.cols-grid.grid-vert:not(.sortmode) .rowflow{display:grid;grid-auto-flow:col
 
 /* ---------- утилиты ---------- */
 const KEY = 'my-templates-v1';
-const APP_VERSION = '2026-11-04.1';
+const APP_VERSION = '2026-11-04.2';
 const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4);
 const $ = s => document.querySelector(s);
 
@@ -505,7 +505,7 @@ function h(tag, props, ...kids) {
 }
 
 /* ---------- данные ---------- */
-let storageOk = true;
+let storageOk = true, quotaHit = false;
 let query = '';
 let scope = 'tab';
 let sortMode = false;
@@ -638,7 +638,7 @@ function save() {
     maybeAuto();
     try { scheduleSyncDot(); } catch (e2) { /* модуль синхронизации ещё не загружен */ }
   } catch (e) {
-    storageOk = false; showWarn();
+    storageOk = false; quotaHit = !!(e && (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED' || e.code === 22 || e.code === 1014)); showWarn();
   }
 }
 
@@ -646,6 +646,7 @@ function showWarn() {
   const w = $('#warn');
   if (storageOk) { w.hidden = true; return; }
   w.hidden = false;
+  if (quotaHit) { w.textContent = 'Не хватило места в хранилище браузера — последние изменения НЕ сохранены. Сделайте «Экспорт», затем освободите место: Меню → Ещё… → «Хранилище и счётчик записей» покажет, что занимает больше всего (корзина, автокопии). Место общее для всех приложений на этом адресе.'; return; }
   w.textContent = 'В этом режиме открытия браузер не даёт сохранять данные — после закрытия они пропадут. Откройте приложение по адресу (см. инструкцию) или регулярно делайте «Экспорт».';
 }
 
@@ -3110,16 +3111,70 @@ function menuSheet() {
           bk ? btn('Вернуть данные, как были ' + fmtDateTime(bk.ts) + ' (' + bk.reason + ')', () => { api.close(); restoreBackup(); }) : null,
           btn('Автокопии' + (meta.folderNeedPerm ? ' ⚠ нужен доступ к папке' : '') + '…', () => { api.close(); autoSheet(); }),
           btn('Подстановки в тексте ({дата}, {?поле})…', () => { api.close(); substSheet(); }),
+          btn('Хранилище и счётчик записей…', () => { api.close(); storageSheet(); }),
           btn('Экспорт в текстовый файл (.txt) — для чтения', () => { api.close(); textExportSheet(); })
         ] : []),
         btn('Закрыть', () => api.close(), 'ghost'),
         h('p', { class: 'tmeta', style: 'text-align:center;margin:4px 0 0;white-space:pre-line',
-          text: 'Версия приложения: ' + APP_VERSION +
+          text: storageSummary() + '\nВерсия приложения: ' + APP_VERSION +
             '\nПоследний экспорт: ' + (meta.lastExport ? fmtDateTime(meta.lastExport) : 'ещё не было') +
             '\nСинхронизация: ' + (syncCfg() ? (readSyncSt().lastSync ? fmtDateTime(readSyncSt().lastSync) : 'ещё не было') : 'не настроена') +
             '\nПоследний импорт: ' + (meta.lastImport ? fmtDateTime(meta.lastImport.ts) + ' (' + meta.lastImport.mode + (meta.lastImport.file ? ', ' + meta.lastImport.file : '') + ')' : 'ещё не было') })));
     draw();
   });
+}
+
+/* ---------- счётчик записей и место в хранилище ---------- */
+const LS_LIMIT = 5 * 1024 * 1024; // знаков localStorage на адрес (≈ 5 МБ), оценка для Chrome
+function countRecords() {
+  let total = 0, arch = 0;
+  state.tabs.forEach(t => t.items.forEach(i => { total++; if (i.archived || t.archived) arch++; }));
+  let tr = 0;
+  state.trash.forEach(e => { tr += e.kind === 'item' ? 1 : e.kind === 'group' ? (e.items || []).length : e.kind === 'tab' ? ((e.tab && e.tab.items) || []).length : 0; });
+  return { total, arch, trash: tr, tabs: state.tabs.length, groups: state.tabs.reduce((n, t) => n + t.groups.length, 0) };
+}
+function storageInfo() {
+  let all = 0, mine = 0; const rows = [];
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i), len = k.length + (localStorage.getItem(k) || '').length;
+      all += len; if (k === KEY || k.startsWith(KEY + ':')) mine += len;
+      rows.push({ k, len });
+    }
+  } catch (e) { /* хранилище недоступно */ }
+  rows.sort((a, b) => b.len - a.len);
+  return { all, mine, rows, pct: Math.min(100, Math.round(all * 100 / LS_LIMIT)) };
+}
+const mb = n => (n < 1048576 ? Math.max(0, Math.round(n / 1024)) + ' КБ' : (n / 1048576).toFixed(1).replace('.', ',') + ' МБ');
+const KEY_NAMES = { [KEY]: 'Мои шаблоны — база', [KEY + ':meta']: 'Мои шаблоны — настройки', [KEY + ':ui']: 'Мои шаблоны — оформление', [KEY + ':sync']: 'Мои шаблоны — синхронизация', [KEY + ':backup']: 'Мои шаблоны — копия перед импортом', [KEY + ':auto']: 'Мои шаблоны — автокопии' };
+function storageSheet() {
+  openModal((box, api) => {
+    const c = countRecords(), si = storageInfo();
+    const bar = h('div', { style: 'height:10px;border-radius:6px;border:1px solid var(--line);overflow:hidden;margin:6px 0 4px' },
+      h('div', { style: 'height:100%;width:' + si.pct + '%;background:var(--accent)' }));
+    const note = h('p', { class: 'msg', text: '' });
+    box.append(h('h2', { text: 'Хранилище и счётчик записей' }),
+      h('div', { class: 'uilbl', text: 'Записи' }),
+      h('p', { class: 'msg', style: 'margin-bottom:10px', text: 'Шаблонов: ' + c.total + ' (из них в архиве ' + c.arch + ')\nВ корзине: ' + c.trash + '\nВкладок: ' + c.tabs + ', групп: ' + c.groups }),
+      h('div', { class: 'uilbl', text: 'Место в хранилище браузера (localStorage)' }),
+      h('p', { class: 'msg', style: 'margin-bottom:0', text: 'Занято на этом адресе: ' + mb(si.all) + ' из ≈ ' + mb(LS_LIMIT) + ' (' + si.pct + '%)\nИз них «Мои шаблоны»: ' + mb(si.mine) }), bar,
+      h('p', { class: 'msg', style: 'margin-top:8px', text: 'Лимит общий для всех приложений, открытых по этому адресу. Если места станет мало, браузер перестанет сохранять изменения.' }),
+      h('div', { class: 'uilbl', text: 'Что занимает больше всего' }),
+      h('ul', { class: 'pvmeta', style: 'margin:0 0 10px 18px;padding:0' }, si.rows.slice(0, 8).map(r =>
+        h('li', {}, (KEY_NAMES[r.k] || r.k) + ' — ' + mb(r.len) + (KEY_NAMES[r.k] ? '' : ' (другое приложение или служебное)')))),
+      note,
+      h('div', { class: 'btns', style: 'margin-top:12px' }, btn('Закрыть', () => api.close(), 'primary')));
+    // общий объём на адрес (IndexedDB, кэш и т. д.) — если браузер умеет сказать
+    if (navigator.storage && navigator.storage.estimate) navigator.storage.estimate().then(e => {
+      if (e && e.quota) note.textContent = 'Всё хранилище адреса (включая кэш приложения и IndexedDB): ' + mb(e.usage || 0) + ' из ' + mb(e.quota) + '. Это отдельный и намного больший лимит.';
+    }).catch(() => {});
+  });
+}
+// короткая сводка для меню
+function storageSummary() {
+  const c = countRecords(), si = storageInfo();
+  return 'Записей: ' + c.total + ' (архив ' + c.arch + ', корзина ' + c.trash + ')' +
+    '\nХранилище: ' + si.pct + '% (' + mb(si.all) + ' из ≈ ' + mb(LS_LIMIT) + ')' + (si.pct >= 80 ? ' ⚠ мало места' : '');
 }
 
 /* ---------- автокопии: история копий в браузере + (Chrome на компьютере) файлы в выбранной папке ---------- */
