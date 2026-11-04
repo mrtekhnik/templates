@@ -44,8 +44,8 @@ const { chromium } = require('playwright');
   await p.keyboard.type('т.д. и'); await undo(); ok(await val() === 'т.д. ', 'sentence: шаг после «т.д. »: ' + JSON.stringify(await val()));
   await undo(); ok(await val() === '', 'sentence: откат до пустого');
   // название отдельно
-  await p.focus('input.field[type=text]'); await p.keyboard.type('Тема'); await undo();
-  ok(await p.inputValue('input.field[type=text]') === '', 'название откатывается отдельно');
+  await p.focus('.sheet input.field'); await p.keyboard.type('Тема'); await undo();
+  ok(await p.inputValue('.sheet input.field') === '', 'название откатывается отдельно');
   ok(await val() === '', 'текст при этом цел');
   await p.screenshot({ path: '/tmp/gm/undo1.png' });
   console.log('errors:', errs); console.log(fails ? 'ПРОВАЛЕНО ' + fails : 'ВСЕ ПРОШЛИ');

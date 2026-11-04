@@ -50,6 +50,8 @@ button{font:inherit;color:inherit;cursor:pointer}
 .search{padding:10px 0 0}
 .field{width:100%;font:inherit;font-size:16px;padding:12px 14px;border:1px solid var(--line);border-radius:12px;
   background:var(--surface);color:var(--ink)}
+.field[type=search]{-webkit-appearance:none;appearance:none}
+.field[type=search]::-webkit-search-cancel-button,.field[type=search]::-webkit-search-decoration{-webkit-appearance:none;display:none}
 .field:focus{outline:2px solid var(--accent);outline-offset:1px}
 .area{min-height:160px;resize:vertical;line-height:1.45;flex:1}
 #warn{background:#fff3cd;color:#4d3b00;padding:10px 14px;border-radius:12px;margin:10px 0 0;font-size:14px}
@@ -480,7 +482,7 @@ body.cols-grid.grid-vert:not(.sortmode) .rowflow{display:grid;grid-auto-flow:col
 
 /* ---------- утилиты ---------- */
 const KEY = 'my-templates-v1';
-const APP_VERSION = '2026-11-03.5';
+const APP_VERSION = '2026-11-04.1';
 const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4);
 const $ = s => document.querySelector(s);
 
@@ -800,7 +802,7 @@ function confirmDialog({ title, message, buttons, cancelValue }) {
 function promptName(title, initial, placeholder) {
   return new Promise(resolve => {
     openModal((box, api) => {
-      const input = h('input', { class: 'field', type: 'text', maxlength: 60, placeholder: placeholder || 'Название вкладки', value: initial || '' });
+      const input = h('input', { class: 'field', type: 'search', autocomplete: 'off', enterkeyhint: 'done', maxlength: 60, placeholder: placeholder || 'Название вкладки', value: initial || '' });
       const err = h('p', { class: 'err', hidden: true, text: 'Введите название' });
       const done = () => {
         const v = input.value.trim();
@@ -856,7 +858,7 @@ function symbolBar(fields, getLast, hist) {
 
 function openEditor(heading, base, tab, onSave) {
   openModal((box, api) => {
-    const t = h('input', { class: 'field', type: 'text', maxlength: 200, placeholder: 'Название (необязательно)', value: base.title });
+    const t = h('input', { class: 'field', type: 'search', autocomplete: 'off', enterkeyhint: 'next', maxlength: 200, placeholder: 'Название (необязательно)', value: base.title });
     const x = h('textarea', { class: 'field area', placeholder: 'Текст шаблона — он копируется', value: base.text });
     const sel = h('select', { class: 'field', 'aria-label': 'Группа' });
     const chk = h('input', { type: 'checkbox' });
@@ -3350,7 +3352,7 @@ function fieldsDialog(fields) {
     const mem = readMeta().fieldMem || {};
     openModal((box, api) => {
       api.dismiss = () => { api.close(); resolve(null); };
-      const inputs = fields.map(f => h('input', { class: 'field', type: 'text', 'aria-label': f.name, placeholder: f.name, value: f.def || mem[f.name] || '' }));
+      const inputs = fields.map(f => h('input', { class: 'field', type: 'search', autocomplete: 'off', enterkeyhint: 'done', 'aria-label': f.name, placeholder: f.name, value: f.def || mem[f.name] || '' }));
       const done = () => {
         const vals = {}, m = readMeta(); m.fieldMem = m.fieldMem || {};
         fields.forEach((f, i) => { vals[f.name] = inputs[i].value; m.fieldMem[f.name] = inputs[i].value; });
@@ -4056,7 +4058,7 @@ async function syncCheck(cfg) {
 function syncSettings() {
   openModal((box, api) => {
     const cur = syncCfg();
-    const repo = h('input', { class: 'field', type: 'text', placeholder: 'имя/репозиторий, например mrtekhnik/sync', value: cur ? cur.repo : '', autocapitalize: 'off', autocomplete: 'off', spellcheck: 'false' });
+    const repo = h('input', { class: 'field', type: 'search', placeholder: 'имя/репозиторий, например mrtekhnik/sync', value: cur ? cur.repo : '', autocapitalize: 'off', autocomplete: 'off', spellcheck: 'false' });
     const token = h('input', { class: 'field', type: 'password', placeholder: cur ? 'токен сохранён (введите новый, чтобы заменить)' : 'токен GitHub', autocomplete: 'off' });
     const status = h('p', { class: 'msg', text: cur ? 'Подключено к ' + cur.repo + '.' : 'Не подключено. Подключение общее для всех ваших приложений на этом адресе.' });
     const delayRow = h('div', { class: 'thm' });

@@ -14,8 +14,8 @@ const { chromium } = require('playwright');
   await p.click('.symrow:not(.cats) button:has-text("°")');
   console.log('mid:', JSON.stringify(await p.inputValue('textarea.area')));
   // в название
-  await p.focus('input.field[type=text]'); await p.click('.symrow:not(.cats) button:has-text("×")');
-  console.log('title:', JSON.stringify(await p.inputValue('input.field[type=text]')));
+  await p.focus('.sheet input.field'); await p.click('.symrow:not(.cats) button:has-text("×")');
+  console.log('title:', JSON.stringify(await p.inputValue('.sheet input.field')));
   // категория
   await p.click('.symrow.cats button:has-text("Стрелки")');
   console.log('arrow btn:', await p.locator('.symrow:not(.cats) button').first().textContent());
