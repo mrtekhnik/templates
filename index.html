@@ -493,7 +493,7 @@ body.cols-grid.grid-vert:not(.sortmode) .rowflow{display:grid;grid-auto-flow:col
 
 /* ---------- утилиты ---------- */
 const KEY = 'my-templates-v1';
-const APP_VERSION = '2026-11-09.2';
+const APP_VERSION = '2026-11-09.3';
 const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4);
 const $ = s => document.querySelector(s);
 
@@ -4499,6 +4499,34 @@ setInterval(() => {
 }, 5000);
 const AUTO_OPTS = [[0, 'Сразу при сворачивании'], [60, 'Через 1 минуту'], [300, 'Через 5 минут'], [900, 'Через 15 минут'], [-1, 'Только при открытии приложения']];
 
+function askPassword(title, hint) {
+  return new Promise(resolve => {
+    const c = lockCfg();
+    if (!c || !c.hash) { resolve(true); return; }
+    openModal((box, api) => {
+      const pw = h('input', { class: 'field', type: 'password', name: 'lockpw', autocomplete: 'off', placeholder: hint || 'Пароль' });
+      const err = h('p', { class: 'err', text: '' });
+      let done = false;
+      api.dismiss = () => { api.close(); if (!done) { done = true; resolve(false); } };
+      const go = async () => {
+        const cc = lockCfg() || c, now = Date.now();
+        if (cc.until && cc.until > now) { err.textContent = 'Слишком много попыток. Подождите ' + Math.ceil((cc.until - now) / 1000) + ' с'; return; }
+        let ok = false;
+        try { ok = (await pwHash(pw.value, unb64(cc.salt), cc.iter)) === cc.hash; } catch (e) {}
+        if (ok) { if (cc.fails || cc.until) { delete cc.fails; delete cc.until; setLockCfg(cc); } done = true; api.close(); resolve(true); return; }
+        cc.fails = (cc.fails || 0) + 1;
+        if (cc.fails >= 5) cc.until = Date.now() + Math.min(30000 * Math.pow(2, cc.fails - 5), 900000);
+        setLockCfg(cc);
+        err.textContent = 'Неверный пароль'; pw.value = ''; pw.focus();
+      };
+      pw.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); go(); } });
+      box.append(h('h2', { text: title }), pw, err,
+        h('div', { class: 'btns', style: 'margin-top:12px' }, btn('Подтвердить', go, 'primary'), btn('Отмена', api.dismiss, 'ghost')));
+      setTimeout(() => pw.focus(), 30);
+    });
+  });
+}
+
 function passwordSheet(onDone) {
   const c0 = lockCfg() || {};
   openModal((box, api) => {
@@ -4536,7 +4564,7 @@ async function lockSheet() {
       else if (c && c.hash) {
         b.push(btn('Сменить пароль…', () => passwordSheet(draw)));
         b.push(btn('Отключить пароль', async () => {
-          if (!c.cred && !(await confirmDialog({ title: 'Отключить защиту?', message: 'Вход в приложение больше не будет запрашиваться.', buttons: [{ label: 'Отключить', value: true, kind: 'danger' }, { label: 'Отмена', value: false, kind: 'ghost' }], cancelValue: false }))) return;
+          if (!(await askPassword('Отключить пароль', 'Введите текущий пароль'))) return;
           const n = { ...c }; delete n.hash; delete n.salt; delete n.iter; delete n.fails; delete n.until;
           setLockCfg(n.cred ? n : null); toast('Пароль отключён'); draw();
         }, 'ghost'));

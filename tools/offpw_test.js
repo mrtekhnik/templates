@@ -1,0 +1,24 @@
+const { chromium } = require('playwright');
+(async () => {
+  const b = await chromium.launch(); const ctx = await b.newContext({ viewport: { width: 420, height: 900 } });
+  const p = await ctx.newPage(); const errs = []; let fails = 0;
+  p.on('pageerror', e => errs.push(e.message));
+  const ok = (c, m) => { console.log((c ? 'PASS ' : 'FAIL ') + m); if (!c) fails++; };
+  await p.goto('http://localhost:8770/index.html'); await p.waitForTimeout(400);
+  const has = () => p.evaluate(() => !!JSON.parse(localStorage.getItem('my-templates-v1:lock') || 'null'));
+  await p.click('#menu'); await p.click('text=Ещё…'); await p.click('text=Защита входом'); await p.waitForTimeout(300);
+  await p.click('text=Задать пароль…'); const pw = p.locator('.sheet input[type=password]');
+  await pw.nth(0).fill('abcd'); await pw.nth(1).fill('abcd'); await p.click('.sheet >> text=Сохранить'); await p.waitForTimeout(500);
+  await p.screenshot({ path: '/tmp/gm/off.png' });
+  await p.click('text=Отключить пароль'); await p.waitForTimeout(200);
+  await p.fill('.sheet input[type=password]', 'bad'); await p.press('.sheet input[type=password]', 'Enter'); await p.waitForTimeout(500);
+  ok(await has(), 'неверный пароль — защита остаётся');
+  ok((await p.locator('.sheet .err').last().innerText()).includes('Неверный'), 'сообщение об ошибке');
+  await p.click('.sheet >> text=Отмена'); await p.waitForTimeout(200);
+  ok(await has(), 'отмена — защита остаётся');
+  await p.click('text=Отключить пароль'); await p.waitForTimeout(200);
+  await p.fill('.sheet input[type=password]', 'abcd'); await p.press('.sheet input[type=password]', 'Enter'); await p.waitForTimeout(500);
+  ok(!(await has()), 'верный пароль — защита отключена');
+  ok(errs.length === 0, 'нет ошибок ' + errs);
+  console.log(fails ? 'FAILS' : 'ALL OK'); await b.close();
+})();
