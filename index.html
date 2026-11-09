@@ -48,6 +48,14 @@ button{font:inherit;color:inherit;cursor:pointer}
   background:var(--surface);font-weight:600;white-space:nowrap}
 .chip.on{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
 .search{padding:10px 0 0}
+#lockscreen{display:none}
+html.locked #lockscreen{display:flex;position:fixed;inset:0;z-index:99999;background:var(--bg);color:var(--ink);align-items:center;justify-content:center;padding:20px}
+html.locked body>*:not(#lockscreen):not(#modals):not(script){display:none!important}
+html.locked #modals{position:relative;z-index:100000}
+.lockhold{display:none!important}
+.lockbox{width:100%;max-width:340px;display:flex;flex-direction:column;gap:12px;text-align:center}
+.lockbox h1{margin:0;font-size:22px}.lockbox .big{font-size:44px;line-height:1}
+.lockbox .err{margin:0;color:#c0392b;min-height:1.2em}
 .field{width:100%;font:inherit;font-size:16px;padding:12px 14px;border:1px solid var(--line);border-radius:12px;
   background:var(--surface);color:var(--ink)}
 .field[type=search]{-webkit-appearance:none;appearance:none}
@@ -430,6 +438,7 @@ body.cols-grid.grid-vert:not(.sortmode) .rowflow{display:grid;grid-auto-flow:col
 </style>
 </head>
 <body>
+<div id="lockscreen"></div>
 <header class="top">
   <div class="wrap">
     <div class="bar">
@@ -484,7 +493,7 @@ body.cols-grid.grid-vert:not(.sortmode) .rowflow{display:grid;grid-auto-flow:col
 
 /* ---------- утилиты ---------- */
 const KEY = 'my-templates-v1';
-const APP_VERSION = '2026-11-08.1';
+const APP_VERSION = '2026-11-09.1';
 const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4);
 const $ = s => document.querySelector(s);
 
@@ -3122,6 +3131,7 @@ function menuSheet() {
         curTab() && !state.special ? btn('+ Новая группа в этой вкладке', () => { api.close(); newGroup(); }) : null,
         btn('Настройки вкладок', () => { api.close(); tabsSheet(); }),
         btn('Оформление и размеры…', () => { api.close(); uiSheet(); }),
+        lockCfg() ? btn('🔒 Заблокировать сейчас', () => { api.close(); lockNow(); }) : null,
         btn('Корзина' + (state.trash.length ? ' (' + state.trash.length + ')' : ''), () => { api.close(); trashSheet(); }),
         btn('Экспорт (сохранить копию в файл)', () => { api.close(); exportData(); }, 'primary exp'),
         btn('Импорт (загрузить из файла)', () => { api.close(); $('#file').click(); }),
@@ -3136,6 +3146,7 @@ function menuSheet() {
           bk ? btn('Вернуть данные, как были ' + fmtDateTime(bk.ts) + ' (' + bk.reason + ')', () => { api.close(); restoreBackup(); }) : null,
           btn('Автокопии' + (meta.folderNeedPerm ? ' ⚠ нужен доступ к папке' : '') + '…', () => { api.close(); autoSheet(); }),
           btn('Подстановки в тексте ({дата}, {?поле})…', () => { api.close(); substSheet(); }),
+          btn('Защита входом (пароль, биометрия)…' + (lockCfg() ? ' — включена' : ''), () => { api.close(); lockSheet(); }),
           btn('Хранилище и счётчик записей…', () => { api.close(); storageSheet(); }),
           btn('Экспорт в текстовый файл (.txt) — для чтения', () => { api.close(); textExportSheet(); })
         ] : []),
@@ -3919,8 +3930,8 @@ mq('(max-width: 700px)').addEventListener('change', () => applyUi());
 /* ---------- синхронизация через GitHub ---------- */
 // Один приватный репозиторий на все приложения; у каждого приложения своя папка. Отправка и получение — только по кнопке ⟳.
 const SYNC_KEY = 'mrtekhnik.sync', SYNC_DIR = 'shablony', SYNC_ST = KEY + ':sync';
-function syncCfg() { try { const v = JSON.parse(localStorage.getItem(SYNC_KEY) || 'null'); return v && v.repo && v.token ? v : null; } catch (e) { return null; } }
-function setSyncCfg(v) { try { if (v) localStorage.setItem(SYNC_KEY, JSON.stringify(v)); else localStorage.removeItem(SYNC_KEY); } catch (e) {} }
+function syncCfg() { try { if (localStorage.getItem(KEY + ':nosync')) return null;  const v = JSON.parse(localStorage.getItem(SYNC_KEY) || 'null'); return v && v.repo && v.token ? v : null; } catch (e) { return null; } }
+function setSyncCfg(v) { try { if (v) { localStorage.removeItem(KEY + ':nosync'); localStorage.setItem(SYNC_KEY, JSON.stringify(v)); } else localStorage.removeItem(SYNC_KEY); } catch (e) {} }
 function apiBase() { try { return localStorage.getItem('mrtekhnik.sync.api') || 'https://api.github.com'; } catch (e) { return 'https://api.github.com'; } }
 async function gh(cfg, path, opt = {}) {
   const hd = { Authorization: 'Bearer ' + cfg.token, Accept: opt.raw ? 'application/vnd.github.raw' : 'application/vnd.github+json' };
@@ -4316,7 +4327,7 @@ $('#q').addEventListener('keydown', e => {
   }
 });
 document.addEventListener('keydown', e => {
-  if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || stack.length) return;
+  if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || stack.length || isLocked()) return;
   const m = /^Digit([1-9])$/.exec(e.code); if (!m) return;
   const tg = e.target && e.target.tagName;
   if ((tg === 'INPUT' || tg === 'TEXTAREA' || tg === 'SELECT') && e.target.id !== 'q') return;
@@ -4342,7 +4353,7 @@ $('#arch').addEventListener('click', () => { searchArchive = !searchArchive; syn
 })();
 // «/» на компьютере — к полю поиска
 document.addEventListener('keydown', e => {
-  if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey || stack.length) return;
+  if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey || stack.length || isLocked()) return;
   const tg = e.target && e.target.tagName;
   if (tg === 'INPUT' || tg === 'TEXTAREA' || tg === 'SELECT') return;
   const q = $('#q'); if (!q || q.disabled || q.closest('[hidden]')) return;
@@ -4364,6 +4375,191 @@ $('#sortBtn').addEventListener('click', () => setSort(!sortMode));
 $('#sortDone').addEventListener('click', () => setSort(false));
 $('#scope').addEventListener('click', () => { scope = scope === 'tab' ? 'all' : 'tab'; syncScope(); renderList(); });
 
+/* ---------- вход по паролю и биометрии (по желанию) ---------- */
+const LOCK_KEY = KEY + ':lock';
+const lockCfg = () => { try { const v = JSON.parse(localStorage.getItem(LOCK_KEY)); return v && (v.hash || v.cred) ? v : null; } catch (e) { return null; } };
+const setLockCfg = v => { try { if (v) localStorage.setItem(LOCK_KEY, JSON.stringify(v)); else localStorage.removeItem(LOCK_KEY); } catch (e) {} };
+const b64 = u8 => btoa(String.fromCharCode(...u8));
+const unb64 = t => Uint8Array.from(atob(t), c => c.charCodeAt(0));
+const cryptoOk = () => !!(window.crypto && crypto.subtle);
+const LOCK_ITER = 150000;
+async function pwHash(pw, salt, iter) {
+  const k = await crypto.subtle.importKey('raw', new TextEncoder().encode(pw), 'PBKDF2', false, ['deriveBits']);
+  return b64(new Uint8Array(await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt, iterations: iter }, k, 256)));
+}
+async function bioAvailable() {
+  try { return !!(window.PublicKeyCredential && navigator.credentials && await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()); } catch (e) { return false; }
+}
+async function bioEnroll() {
+  const c = await navigator.credentials.create({ publicKey: {
+    challenge: crypto.getRandomValues(new Uint8Array(32)),
+    rp: { name: 'Мои шаблоны' },
+    user: { id: crypto.getRandomValues(new Uint8Array(16)), name: 'user', displayName: 'Мои шаблоны' },
+    pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }],
+    authenticatorSelection: { authenticatorAttachment: 'platform', userVerification: 'required' },
+    timeout: 60000 } });
+  return b64(new Uint8Array(c.rawId));
+}
+async function bioCheck(id) {
+  await navigator.credentials.get({ publicKey: {
+    challenge: crypto.getRandomValues(new Uint8Array(32)),
+    allowCredentials: [{ type: 'public-key', id: unb64(id) }],
+    userVerification: 'required', timeout: 60000 } });
+  return true;
+}
+const isLocked = () => document.documentElement.classList.contains('locked');
+function markLockSkip() { try { sessionStorage.setItem('lockSkip', String(Date.now())); } catch (e) {} }
+function lockNow() {
+  if (!lockCfg()) return;
+  [...$('#modals').children].forEach(o => o.classList.add('lockhold'));
+  document.documentElement.classList.add('locked');
+  drawLock();
+}
+function unlock() {
+  document.documentElement.classList.remove('locked');
+  $('#lockscreen').replaceChildren();
+  [...$('#modals').children].forEach(o => o.classList.remove('lockhold'));
+  const c = lockCfg(); if (c && (c.fails || c.until)) { delete c.fails; delete c.until; setLockCfg(c); }
+}
+let bioBusy = false;
+async function tryBio(err) {
+  const c = lockCfg(); if (!c || !c.cred || bioBusy || !isLocked()) return;
+  bioBusy = true;
+  try { await bioCheck(c.cred); unlock(); }
+  catch (e) { if (err && isLocked()) err.textContent = 'Биометрия не подтверждена' + (c.hash ? ' — введите пароль' : ' — нажмите кнопку ещё раз'); }
+  finally { bioBusy = false; }
+}
+function drawLock() {
+  const c = lockCfg(), root = $('#lockscreen');
+  if (!c) { unlock(); return; }
+  const err = h('p', { class: 'err' });
+  const kids = [h('div', { class: 'big', text: '🔒' }), h('h1', { text: 'Мои шаблоны' })];
+  if (c.hash) {
+    const pw = h('input', { class: 'field', type: 'password', name: 'lockpw', autocomplete: 'off', placeholder: 'Пароль', enterkeyhint: 'go' });
+    let busy = false;
+    const go = async () => {
+      if (busy) return;
+      const now = Date.now(), cc = lockCfg() || c;
+      if (cc.until && cc.until > now) { err.textContent = 'Слишком много попыток. Подождите ' + Math.ceil((cc.until - now) / 1000) + ' с'; return; }
+      if (!pw.value) { pw.focus(); return; }
+      busy = true;
+      try {
+        const ok = (await pwHash(pw.value, unb64(cc.salt), cc.iter)) === cc.hash;
+        if (ok) { unlock(); return; }
+        cc.fails = (cc.fails || 0) + 1;
+        if (cc.fails >= 5) cc.until = Date.now() + Math.min(30000 * Math.pow(2, cc.fails - 5), 900000);
+        setLockCfg(cc);
+        err.textContent = cc.until && cc.until > Date.now() ? 'Неверно. Следующая попытка через ' + Math.ceil((cc.until - Date.now()) / 1000) + ' с' : 'Неверный пароль';
+        pw.value = ''; pw.focus();
+      } catch (e) { err.textContent = 'Не удалось проверить пароль'; }
+      finally { busy = false; }
+    };
+    pw.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); go(); } });
+    kids.push(pw, err, btn('Войти', go, 'primary'));
+    if (c.cred) kids.push(btn('👆 Биометрия', () => tryBio(err)));
+    kids.push(btn('Забыли пароль?', forgotLock, 'ghost'));
+    root.replaceChildren(h('div', { class: 'lockbox' }, ...kids));
+    if (!c.cred) setTimeout(() => { try { pw.focus(); } catch (e) {} }, 50);
+  } else {
+    kids.push(err, btn('👆 Разблокировать', () => tryBio(err), 'primary'), btn('Не получается?', forgotLock, 'ghost'));
+    root.replaceChildren(h('div', { class: 'lockbox' }, ...kids));
+  }
+  if (c.cred && document.visibilityState === 'visible') tryBio(err);
+}
+async function forgotLock() {
+  const v = await confirmDialog({
+    title: 'Сбросить вход?',
+    message: 'Пароль нельзя восстановить. Чтобы убрать защиту, нужно СТЕРЕТЬ все шаблоны и настройки на этом устройстве. Если включена синхронизация с GitHub — данные можно вернуть из облака, заново введя токен.',
+    buttons: [{ label: 'Стереть всё и сбросить вход', value: 'wipe', kind: 'danger' }, { label: 'Отмена', value: null, kind: 'ghost' }],
+    cancelValue: null });
+  if (v !== 'wipe') return;
+  try {
+    const ks = []; for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.indexOf(KEY) === 0) ks.push(k); }
+    ks.forEach(k => localStorage.removeItem(k));
+    localStorage.setItem(KEY + ':nosync', '1');
+  } catch (e) {}
+  location.reload();
+}
+document.addEventListener('visibilitychange', () => {
+  const c = lockCfg(); if (!c || isLocked()) return;
+  if (document.hidden) { lockHiddenAt = Date.now(); if (c.auto === 0) lockNow(); }
+  else if (lockHiddenAt && c.auto >= 0 && Date.now() - lockHiddenAt >= c.auto * 1000) lockNow();
+});
+let lockHiddenAt = 0;
+const AUTO_OPTS = [[0, 'Сразу при сворачивании'], [60, 'Через 1 минуту'], [300, 'Через 5 минут'], [900, 'Через 15 минут'], [-1, 'Только при открытии приложения']];
+
+function passwordSheet(onDone) {
+  const c0 = lockCfg() || {};
+  openModal((box, api) => {
+    const cur = c0.hash ? h('input', { class: 'field', type: 'password', autocomplete: 'off', placeholder: 'Текущий пароль' }) : null;
+    const p1 = h('input', { class: 'field', type: 'password', autocomplete: 'off', placeholder: 'Новый пароль (от 4 знаков)' });
+    const p2 = h('input', { class: 'field', type: 'password', autocomplete: 'off', placeholder: 'Повторите пароль' });
+    const err = h('p', { class: 'err', text: '' });
+    const save = async () => {
+      try {
+        if (cur) { const ok = (await pwHash(cur.value, unb64(c0.salt), c0.iter)) === c0.hash; if (!ok) { err.textContent = 'Текущий пароль неверный'; return; } }
+        if (p1.value.length < 4) { err.textContent = 'Пароль слишком короткий'; return; }
+        if (p1.value !== p2.value) { err.textContent = 'Пароли не совпадают'; return; }
+        const salt = crypto.getRandomValues(new Uint8Array(16));
+        const c = { ...c0, salt: b64(salt), iter: LOCK_ITER, hash: await pwHash(p1.value, salt, LOCK_ITER), auto: c0.auto == null ? 60 : c0.auto };
+        delete c.fails; delete c.until;
+        setLockCfg(c); api.close(); toast('Пароль сохранён'); onDone && onDone();
+      } catch (e) { err.textContent = 'Не удалось сохранить пароль'; }
+    };
+    [cur, p1, p2].forEach(i => i && i.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); save(); } }));
+    box.append(h('h2', { text: c0.hash ? 'Сменить пароль' : 'Задать пароль' }), ...[cur, p1, p2].filter(Boolean), err,
+      h('div', { class: 'btns', style: 'margin-top:12px' }, btn('Сохранить', save, 'primary'), btn('Отмена', api.dismiss, 'ghost')));
+    setTimeout(() => (cur || p1).focus(), 30);
+  });
+}
+
+async function lockSheet() {
+  const bioOk = await bioAvailable();
+  openModal((box, api) => {
+    const draw = () => {
+      const c = lockCfg();
+      const rows = [h('h2', { text: 'Защита входом' }),
+        h('p', { class: 'tmeta', style: 'white-space:pre-line', text: 'Всё по желанию: можно включить только пароль, только биометрию или оба способа.\nЭто защита от случайного просмотра. Данные на устройстве не шифруются.' })];
+      const b = [];
+      if (!cryptoOk()) b.push(h('p', { class: 'tmeta', text: 'Пароль недоступен: браузер не поддерживает шифрование на этой странице (нужен https).' }));
+      else if (c && c.hash) {
+        b.push(btn('Сменить пароль…', () => passwordSheet(draw)));
+        b.push(btn('Отключить пароль', async () => {
+          if (!c.cred && !(await confirmDialog({ title: 'Отключить защиту?', message: 'Вход в приложение больше не будет запрашиваться.', buttons: [{ label: 'Отключить', value: true, kind: 'danger' }, { label: 'Отмена', value: false, kind: 'ghost' }], cancelValue: false }))) return;
+          const n = { ...c }; delete n.hash; delete n.salt; delete n.iter; delete n.fails; delete n.until;
+          setLockCfg(n.cred ? n : null); toast('Пароль отключён'); draw();
+        }, 'ghost'));
+      } else b.push(btn('Задать пароль…', () => passwordSheet(draw)));
+      if (bioOk) {
+        if (c && c.cred) b.push(btn('Отключить биометрию', () => {
+          const n = { ...c }; delete n.cred;
+          setLockCfg(n.hash ? n : null); toast('Биометрия отключена'); draw();
+        }, 'ghost'));
+        else b.push(btn('Включить биометрию (отпечаток / лицо)', async () => {
+          try {
+            const id = await bioEnroll();
+            const n = { ...(lockCfg() || {}), cred: id }; if (n.auto == null) n.auto = 60;
+            setLockCfg(n); toast('Биометрия включена'); draw();
+          } catch (e) { toast('Не удалось включить биометрию', true); }
+        }));
+      } else b.push(h('p', { class: 'tmeta', text: 'Биометрия недоступна на этом устройстве или в этом режиме открытия.' }));
+      if (c) {
+        const sel = h('select', { class: 'field', onchange: () => { const n = lockCfg(); if (n) { n.auto = +sel.value; setLockCfg(n); } } },
+          AUTO_OPTS.map(([v, t]) => h('option', { value: String(v), text: t, selected: (c.auto == null ? 60 : c.auto) === v })));
+        b.push(h('label', { class: 'tmeta', text: 'Блокировать:' }), sel);
+        b.push(btn('🔒 Заблокировать сейчас', () => { api.close(); lockNow(); }, 'primary'));
+      }
+      b.push(btn('Закрыть', () => api.close(), 'ghost'));
+      box.replaceChildren(...rows, h('div', { class: 'btns' }, ...b));
+    };
+    draw();
+  });
+}
+
+{ let skip = false;
+  try { const t = +sessionStorage.getItem('lockSkip'); skip = !!t && Date.now() - t < 60000; sessionStorage.removeItem('lockSkip'); } catch (e) {}
+  if (lockCfg() && !skip) lockNow(); }
+
 { const m0 = readMeta(); if (!m0.first) { m0.first = Date.now(); writeMeta(m0); } }
 applyUi();
 showWarn(); syncScope(); renderTabs(); renderList();
@@ -4372,6 +4568,7 @@ showWarn(); syncScope(); renderTabs(); renderList();
 let swReg = null, updWorker = null;
 function showUpdate(worker) { updWorker = worker; $('#updbar').hidden = false; }
 function applyUpdate() {
+  markLockSkip();
   if (updWorker) { $('#updBtn').disabled = true; updWorker.postMessage({ type: 'SKIP_WAITING' }); setTimeout(() => location.reload(), 4000); }
   else location.reload();
 }
@@ -4399,7 +4596,7 @@ if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
     });
   }).catch(() => {});
   let reloading = false;
-  navigator.serviceWorker.addEventListener('controllerchange', () => { if (!hadController || reloading) return; reloading = true; location.reload(); });
+  navigator.serviceWorker.addEventListener('controllerchange', () => { if (!hadController || reloading) return; reloading = true; markLockSkip(); location.reload(); });
   // при возвращении в приложение — тихая проверка
   document.addEventListener('visibilitychange', () => { if (!document.hidden && swReg) swReg.update().catch(() => {}); });
 }
