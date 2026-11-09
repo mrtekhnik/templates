@@ -493,7 +493,7 @@ body.cols-grid.grid-vert:not(.sortmode) .rowflow{display:grid;grid-auto-flow:col
 
 /* ---------- утилиты ---------- */
 const KEY = 'my-templates-v1';
-const APP_VERSION = '2026-11-09.1';
+const APP_VERSION = '2026-11-09.2';
 const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4);
 const $ = s => document.querySelector(s);
 
@@ -4419,6 +4419,7 @@ function unlock() {
   document.documentElement.classList.remove('locked');
   $('#lockscreen').replaceChildren();
   [...$('#modals').children].forEach(o => o.classList.remove('lockhold'));
+  lockLastAct = Date.now();
   const c = lockCfg(); if (c && (c.fails || c.until)) { delete c.fails; delete c.until; setLockCfg(c); }
 }
 let bioBusy = false;
@@ -4485,7 +4486,17 @@ document.addEventListener('visibilitychange', () => {
   if (document.hidden) { lockHiddenAt = Date.now(); if (c.auto === 0) lockNow(); }
   else if (lockHiddenAt && c.auto >= 0 && Date.now() - lockHiddenAt >= c.auto * 1000) lockNow();
 });
-let lockHiddenAt = 0;
+let lockHiddenAt = 0, lockLastAct = Date.now();
+const IDLE_OPTS = [[0, 'Не блокировать'], [1, 'Через 1 минуту'], [5, 'Через 5 минут'], [15, 'Через 15 минут']];
+const idleMin = c => c.idle == null ? 5 : c.idle;
+['pointerdown', 'pointermove', 'keydown', 'wheel', 'scroll', 'touchstart'].forEach(ev =>
+  document.addEventListener(ev, () => { lockLastAct = Date.now(); }, { passive: true, capture: true }));
+setInterval(() => {
+  if (isLocked()) return;
+  const c = lockCfg(); if (!c) return;
+  const m = idleMin(c);
+  if (m > 0 && Date.now() - lockLastAct >= m * 60000) lockNow();
+}, 5000);
 const AUTO_OPTS = [[0, 'Сразу при сворачивании'], [60, 'Через 1 минуту'], [300, 'Через 5 минут'], [900, 'Через 15 минут'], [-1, 'Только при открытии приложения']];
 
 function passwordSheet(onDone) {
@@ -4546,7 +4557,10 @@ async function lockSheet() {
       if (c) {
         const sel = h('select', { class: 'field', onchange: () => { const n = lockCfg(); if (n) { n.auto = +sel.value; setLockCfg(n); } } },
           AUTO_OPTS.map(([v, t]) => h('option', { value: String(v), text: t, selected: (c.auto == null ? 60 : c.auto) === v })));
-        b.push(h('label', { class: 'tmeta', text: 'Блокировать:' }), sel);
+        b.push(h('label', { class: 'tmeta', text: 'При сворачивании / переключении вкладки:' }), sel);
+        const sel2 = h('select', { class: 'field', onchange: () => { const n = lockCfg(); if (n) { n.idle = +sel2.value; setLockCfg(n); } } },
+          IDLE_OPTS.map(([v, t]) => h('option', { value: String(v), text: t, selected: idleMin(c) === v })));
+        b.push(h('label', { class: 'tmeta', text: 'Если не пользуетесь приложением:' }), sel2);
         b.push(btn('🔒 Заблокировать сейчас', () => { api.close(); lockNow(); }, 'primary'));
       }
       b.push(btn('Закрыть', () => api.close(), 'ghost'));

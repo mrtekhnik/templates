@@ -1,0 +1,20 @@
+const { chromium } = require('playwright');
+(async () => {
+  const b = await chromium.launch(); const ctx = await b.newContext({ viewport: { width: 420, height: 900 } });
+  const p = await ctx.newPage(); const errs = []; let fails = 0;
+  p.on('pageerror', e => errs.push(e.message));
+  const ok = (c, m) => { console.log((c ? 'PASS ' : 'FAIL ') + m); if (!c) fails++; };
+  await p.addInitScript(() => { window.__t = 0; const R = Date.now; Date.now = () => R() + window.__t; });
+  await p.goto('http://localhost:8770/index.html'); await p.waitForTimeout(400);
+  const locked = () => p.evaluate(() => document.documentElement.classList.contains('locked'));
+  await p.evaluate(async () => { const s = crypto.getRandomValues(new Uint8Array(16)); localStorage.setItem('my-templates-v1:lock', JSON.stringify({ salt: btoa(String.fromCharCode(...s)), iter: 1000, hash: 'x', auto: -1 })); });
+  const jump = async m => { await p.evaluate(m => { window.__t += m * 60000; }, m); await p.waitForTimeout(5600); };
+  await jump(4); ok(!(await locked()), 'через 4 минуты (по умолчанию 5) не заблокировано');
+  await p.mouse.move(100, 100); await p.mouse.down(); await p.mouse.up();
+  await jump(4); ok(!(await locked()), 'действие сбросило отсчёт');
+  await jump(2); ok(await locked(), 'через 5 минут бездействия заблокировано');
+  await p.evaluate(() => { const k = 'my-templates-v1:lock', c = JSON.parse(localStorage.getItem(k)); c.idle = 0; localStorage.setItem(k, JSON.stringify(c)); document.documentElement.classList.remove('locked'); });
+  await jump(30); ok(!(await locked()), '«Не блокировать» — не блокирует');
+  ok(errs.length === 0, 'нет ошибок ' + errs);
+  console.log(fails ? 'FAILS' : 'ALL OK'); await b.close();
+})();
