@@ -12,7 +12,7 @@ const { chromium } = require('playwright');
   // установка пароля
   await p.click('#menu'); await p.click('text=Ещё…'); await p.click('text=Защита входом'); await p.waitForTimeout(300);
   await p.click('text=Задать пароль…'); await p.waitForTimeout(150);
-  const pw = p.locator('.sheet input[type=password]');
+  const pw = p.locator('.sheet input.pwmask');
   await pw.nth(0).fill('12'); await pw.nth(1).fill('12'); await p.click('.sheet >> text=Сохранить'); await p.waitForTimeout(300);
   ok((await p.locator('.sheet .err').innerText()).includes('короткий'), 'короткий пароль отклонён');
   await pw.nth(0).fill('abcd'); await pw.nth(1).fill('abce'); await p.click('.sheet >> text=Сохранить'); await p.waitForTimeout(300);
@@ -26,20 +26,20 @@ const { chromium } = require('playwright');
   ok(!(await p.locator('#list').isVisible()), 'список скрыт');
   await p.keyboard.press('Alt+Digit1'); await p.keyboard.press('/');
   // неверный пароль
-  await p.fill('#lockscreen input', 'wrong'); await p.press('#lockscreen input', 'Enter'); await p.waitForTimeout(600);
+  await p.fill('#lockscreen input.pwmask', 'wrong'); await p.press('#lockscreen input.pwmask', 'Enter'); await p.waitForTimeout(600);
   ok((await locked()) && (await p.locator('#lockscreen .err').innerText()).includes('Неверный'), 'неверный пароль не пускает');
   // троттлинг
-  for (let i = 0; i < 4; i++) { await p.fill('#lockscreen input', 'x' + i); await p.press('#lockscreen input', 'Enter'); await p.waitForTimeout(500); }
-  await p.fill('#lockscreen input', 'abcd'); await p.press('#lockscreen input', 'Enter'); await p.waitForTimeout(500);
+  for (let i = 0; i < 4; i++) { await p.fill('#lockscreen input.pwmask', 'x' + i); await p.press('#lockscreen input.pwmask', 'Enter'); await p.waitForTimeout(500); }
+  await p.fill('#lockscreen input.pwmask', 'abcd'); await p.press('#lockscreen input.pwmask', 'Enter'); await p.waitForTimeout(500);
   ok((await locked()) && (await p.locator('#lockscreen .err').innerText()).includes('Слишком'), 'после 5 ошибок — пауза, даже верный пароль не принят');
   await p.evaluate(() => { const k = 'my-templates-v1:lock', c = JSON.parse(localStorage.getItem(k)); c.until = 0; localStorage.setItem(k, JSON.stringify(c)); });
-  await p.fill('#lockscreen input', 'abcd'); await p.press('#lockscreen input', 'Enter'); await p.waitForTimeout(600);
+  await p.fill('#lockscreen input.pwmask', 'abcd'); await p.press('#lockscreen input.pwmask', 'Enter'); await p.waitForTimeout(600);
   ok(!(await locked()), 'верный пароль открывает');
   ok((await p.locator('#list .card', { hasText: 'Секретный' }).count()) === 1, 'данные на месте');
   // запуск заново — заблокировано
   await p.reload(); await p.waitForTimeout(400);
   ok(await locked(), 'при новом открытии требуется вход');
-  await p.fill('#lockscreen input', 'abcd'); await p.press('#lockscreen input', 'Enter'); await p.waitForTimeout(600);
+  await p.fill('#lockscreen input.pwmask', 'abcd'); await p.press('#lockscreen input.pwmask', 'Enter'); await p.waitForTimeout(600);
   ok(!(await locked()), 'вход после перезапуска');
   // пропуск при обновлении
   await p.evaluate(() => sessionStorage.setItem('lockSkip', String(Date.now()))); await p.reload(); await p.waitForTimeout(400);

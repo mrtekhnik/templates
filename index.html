@@ -54,6 +54,7 @@ html.locked body>*:not(#lockscreen):not(#modals):not(script){display:none!import
 html.locked #modals{position:relative;z-index:100000}
 .lockhold{display:none!important}
 .lockbox{width:100%;max-width:340px;display:flex;flex-direction:column;gap:12px;text-align:center}
+.pwmask{-webkit-text-security:disc;text-security:disc}
 .lockbox h1{margin:0;font-size:22px}.lockbox .big{font-size:44px;line-height:1}
 .lockbox .err{margin:0;color:#c0392b;min-height:1.2em}
 .field{width:100%;font:inherit;font-size:16px;padding:12px 14px;border:1px solid var(--line);border-radius:12px;
@@ -493,7 +494,7 @@ body.cols-grid.grid-vert:not(.sortmode) .rowflow{display:grid;grid-auto-flow:col
 
 /* ---------- утилиты ---------- */
 const KEY = 'my-templates-v1';
-const APP_VERSION = '2026-11-09.3';
+const APP_VERSION = '2026-11-10.1';
 const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4);
 const $ = s => document.querySelector(s);
 
@@ -4383,6 +4384,9 @@ const b64 = u8 => btoa(String.fromCharCode(...u8));
 const unb64 = t => Uint8Array.from(atob(t), c => c.charCodeAt(0));
 const cryptoOk = () => !!(window.crypto && crypto.subtle);
 const LOCK_ITER = 150000;
+// поле пароля — обычное текстовое с маскировкой: Chrome не предлагает «сохранённые пароли» и не лезет с автозаполнением
+const pwField = (ph, num, extra) => h('input', { class: 'field pwmask', type: 'text', autocomplete: 'off', autocapitalize: 'none', autocorrect: 'off', spellcheck: false,
+  inputmode: num ? 'numeric' : 'text', 'data-lpignore': 'true', 'data-1p-ignore': 'true', placeholder: ph, ...(extra || {}) });
 async function pwHash(pw, salt, iter) {
   const k = await crypto.subtle.importKey('raw', new TextEncoder().encode(pw), 'PBKDF2', false, ['deriveBits']);
   return b64(new Uint8Array(await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt, iterations: iter }, k, 256)));
@@ -4436,7 +4440,7 @@ function drawLock() {
   const err = h('p', { class: 'err' });
   const kids = [h('div', { class: 'big', text: '🔒' }), h('h1', { text: 'Мои шаблоны' })];
   if (c.hash) {
-    const pw = h('input', { class: 'field', type: 'password', name: 'lockpw', autocomplete: 'off', placeholder: 'Пароль', enterkeyhint: 'go' });
+    const pw = pwField('Пароль', c.num, { enterkeyhint: 'go' });
     let busy = false;
     const go = async () => {
       if (busy) return;
@@ -4456,7 +4460,11 @@ function drawLock() {
       finally { busy = false; }
     };
     pw.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); go(); } });
-    kids.push(pw, err, btn('Войти', go, 'primary'));
+    const kb = btn(pw.inputMode === 'numeric' ? 'Обычная клавиатура' : 'Цифровая клавиатура', () => {
+      const num = pw.inputMode !== 'numeric'; pw.inputMode = num ? 'numeric' : 'text';
+      kb.textContent = num ? 'Обычная клавиатура' : 'Цифровая клавиатура'; pw.blur(); pw.focus();
+    }, 'ghost');
+    kids.push(pw, err, btn('Войти', go, 'primary'), kb);
     if (c.cred) kids.push(btn('👆 Биометрия', () => tryBio(err)));
     kids.push(btn('Забыли пароль?', forgotLock, 'ghost'));
     root.replaceChildren(h('div', { class: 'lockbox' }, ...kids));
@@ -4504,7 +4512,7 @@ function askPassword(title, hint) {
     const c = lockCfg();
     if (!c || !c.hash) { resolve(true); return; }
     openModal((box, api) => {
-      const pw = h('input', { class: 'field', type: 'password', name: 'lockpw', autocomplete: 'off', placeholder: hint || 'Пароль' });
+      const pw = pwField(hint || 'Пароль', c.num);
       const err = h('p', { class: 'err', text: '' });
       let done = false;
       api.dismiss = () => { api.close(); if (!done) { done = true; resolve(false); } };
@@ -4530,9 +4538,9 @@ function askPassword(title, hint) {
 function passwordSheet(onDone) {
   const c0 = lockCfg() || {};
   openModal((box, api) => {
-    const cur = c0.hash ? h('input', { class: 'field', type: 'password', autocomplete: 'off', placeholder: 'Текущий пароль' }) : null;
-    const p1 = h('input', { class: 'field', type: 'password', autocomplete: 'off', placeholder: 'Новый пароль (от 4 знаков)' });
-    const p2 = h('input', { class: 'field', type: 'password', autocomplete: 'off', placeholder: 'Повторите пароль' });
+    const cur = c0.hash ? pwField('Текущий пароль', c0.num) : null;
+    const p1 = pwField('Новый пароль (от 4 знаков)', false);
+    const p2 = pwField('Повторите пароль', false);
     const err = h('p', { class: 'err', text: '' });
     const save = async () => {
       try {
@@ -4540,7 +4548,7 @@ function passwordSheet(onDone) {
         if (p1.value.length < 4) { err.textContent = 'Пароль слишком короткий'; return; }
         if (p1.value !== p2.value) { err.textContent = 'Пароли не совпадают'; return; }
         const salt = crypto.getRandomValues(new Uint8Array(16));
-        const c = { ...c0, salt: b64(salt), iter: LOCK_ITER, hash: await pwHash(p1.value, salt, LOCK_ITER), auto: c0.auto == null ? 60 : c0.auto };
+        const c = { ...c0, salt: b64(salt), iter: LOCK_ITER, hash: await pwHash(p1.value, salt, LOCK_ITER), auto: c0.auto == null ? 60 : c0.auto, num: /^\d+$/.test(p1.value) };
         delete c.fails; delete c.until;
         setLockCfg(c); api.close(); toast('Пароль сохранён'); onDone && onDone();
       } catch (e) { err.textContent = 'Не удалось сохранить пароль'; }
