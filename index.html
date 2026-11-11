@@ -494,7 +494,7 @@ body.cols-grid.grid-vert:not(.sortmode) .rowflow{display:grid;grid-auto-flow:col
 
 /* ---------- утилиты ---------- */
 const KEY = 'my-templates-v1';
-const APP_VERSION = '2026-11-10.1';
+const APP_VERSION = '2026-11-11.1';
 const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4);
 const $ = s => document.querySelector(s);
 
@@ -4450,7 +4450,7 @@ function drawLock() {
       busy = true;
       try {
         const ok = (await pwHash(pw.value, unb64(cc.salt), cc.iter)) === cc.hash;
-        if (ok) { unlock(); return; }
+        if (ok) { if (cc.num == null) { cc.num = /^\d+$/.test(pw.value); setLockCfg(cc); } unlock(); return; }
         cc.fails = (cc.fails || 0) + 1;
         if (cc.fails >= 5) cc.until = Date.now() + Math.min(30000 * Math.pow(2, cc.fails - 5), 900000);
         setLockCfg(cc);
