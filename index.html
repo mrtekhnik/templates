@@ -207,7 +207,12 @@ body.kbnav .card[data-n]::before{content:attr(data-n);position:absolute;right:12
 .undob:disabled{opacity:.35}
 .symbar{flex:none;display:flex;flex-direction:column;gap:4px;min-width:0}
 .symrow{display:flex;gap:4px;overflow-x:auto;scrollbar-width:none;padding-bottom:1px}
-.symrow::-webkit-scrollbar{display:none}
+@media (hover:hover) and (pointer:fine){
+  .symrow{scrollbar-width:thin;scrollbar-color:var(--line) transparent;padding-bottom:6px}
+  .symrow::-webkit-scrollbar{display:block;height:6px}
+  .symrow::-webkit-scrollbar-thumb{background:var(--line);border-radius:6px}
+}
+@media not all and (hover:hover) and (pointer:fine){.symrow::-webkit-scrollbar{display:none}}
 .symrow button{flex:none;min-width:38px;min-height:38px;padding:0 8px;border-radius:10px;border:1px solid var(--line);background:var(--surface);color:var(--ink);font-size:18px;line-height:1}
 .symrow.cats button{min-height:30px;min-width:0;border-radius:999px;font-size:13px;color:var(--muted);padding:0 12px;white-space:nowrap}
 .symrow.cats button.on{background:var(--accent-soft);color:var(--ink);border-color:var(--accent);font-weight:600}
@@ -494,7 +499,7 @@ body.cols-grid.grid-vert:not(.sortmode) .rowflow{display:grid;grid-auto-flow:col
 
 /* ---------- утилиты ---------- */
 const KEY = 'my-templates-v1';
-const APP_VERSION = '2026-11-11.1';
+const APP_VERSION = '2026-11-12.1';
 const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4);
 const $ = s => document.querySelector(s);
 
@@ -882,6 +887,12 @@ function symbolBar(fields, getLast, hist) {
       }, ch))));
   };
   draw();
+  // колесо мыши прокручивает ряд по горизонтали
+  bar.addEventListener('wheel', e => {
+    const row = e.target.closest && e.target.closest('.symrow');
+    if (!row || row.scrollWidth <= row.clientWidth || e.deltaX) return;
+    e.preventDefault(); row.scrollLeft += e.deltaY;
+  }, { passive: false });
   return bar;
 }
 
