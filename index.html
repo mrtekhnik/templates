@@ -499,7 +499,7 @@ body.cols-grid.grid-vert:not(.sortmode) .rowflow{display:grid;grid-auto-flow:col
 
 /* ---------- утилиты ---------- */
 const KEY = 'my-templates-v1';
-const APP_VERSION = '2026-11-12.1';
+const APP_VERSION = '2026-11-13.1';
 const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4);
 const $ = s => document.querySelector(s);
 
@@ -3392,12 +3392,16 @@ const TOKEN_RE = /\{(\?)?([^{}\n]{1,400})\}/g;
 const WEEKDAYS = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота'];
 const MONTHS = ['январь', 'февраль', 'март', 'апрель', 'май', 'июнь', 'июль', 'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь'];
 const MONTHS_GEN = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
+// украинские названия: {місяць}, {день тижня}, {дата словами}… — результат тоже по-украински
+const WEEKDAYS_UK = ['неділя', 'понеділок', 'вівторок', 'середа', 'четвер', 'пʼятниця', 'субота'];
+const MONTHS_UK = ['січень', 'лютий', 'березень', 'квітень', 'травень', 'червень', 'липень', 'серпень', 'вересень', 'жовтень', 'листопад', 'грудень'];
+const MONTHS_UK_GEN = ['січня', 'лютого', 'березня', 'квітня', 'травня', 'червня', 'липня', 'серпня', 'вересня', 'жовтня', 'листопада', 'грудня'];
 const substOn = () => readMeta().subst !== false;
 // имя подстановки приводим к одному виду: регистр, ё, неразрывные пробелы, лишние пробелы, латинские буквы-двойники
 const LAT2CYR = { a: 'а', c: 'с', e: 'е', o: 'о', p: 'р', x: 'х', y: 'у', k: 'к', m: 'м', t: 'т', b: 'в', h: 'н' };
 function normName(name) {
   let n = name.replace(/[\u00a0\u2007\u202f]/g, ' ').trim().toLowerCase().replace(/ё/g, 'е').replace(/\s+/g, ' ');
-  if (/[а-я]/.test(n)) n = n.replace(/[a-z]/g, c => LAT2CYR[c] || c);        // «дaта» с латинской «a» тоже распознаётся
+  if (/[а-яіїєґ]/.test(n)) n = n.replace(/[a-z]/g, c => LAT2CYR[c] || c);        // «дaта» с латинской «a» тоже распознаётся
   return n;
 }
 function autoToken(name, now) {
@@ -3413,6 +3417,16 @@ function autoToken(name, now) {
   m = n.match(/^дата (текстом|прописью)(?:\s*([+\-−–])\s*(\d{1,4}))?$/);
   if (m) { const d = shift(m[2] ? (m[2] === '+' ? 1 : -1) * parseInt(m[3], 10) : 0); return d.getDate() + ' ' + MONTHS_GEN[d.getMonth()] + ' ' + d.getFullYear() + ' г.'; }
   if (n === 'дата кратко') return p2(now.getDate()) + '.' + p2(now.getMonth() + 1);
+  if (n === 'сьогодні') return ddmmyyyy(now);
+  if (n === 'вчора') return ddmmyyyy(shift(-1));
+  if (n === 'післязавтра') return ddmmyyyy(shift(2));
+  m = n.match(/^дата (словами|текстом)(?:\s*([+\-−–])\s*(\d{1,4}))?$/);
+  if (m && m[1] === 'словами') { const d = shift(m[2] ? (m[2] === '+' ? 1 : -1) * parseInt(m[3], 10) : 0); return d.getDate() + ' ' + MONTHS_UK_GEN[d.getMonth()] + ' ' + d.getFullYear() + ' р.'; }
+  if (n === 'дата коротко') return p2(now.getDate()) + '.' + p2(now.getMonth() + 1);
+  if (n === 'час') return p2(now.getHours()) + ':' + p2(now.getMinutes());
+  if (n === 'рік') return String(now.getFullYear());
+  if (n === 'місяць') return MONTHS_UK[now.getMonth()];
+  if (n === 'день тижня') return WEEKDAYS_UK[now.getDay()];
   if (n === 'время' || n === 'time') return p2(now.getHours()) + ':' + p2(now.getMinutes());
   if (n === 'год') return String(now.getFullYear());
   if (n === 'месяц') return MONTHS[now.getMonth()];
@@ -3426,7 +3440,7 @@ function unknownTokens(texts) {
   texts.forEach(t => { for (const m of t.matchAll(TOKEN_RE)) {
     if (m[1]) continue;
     const n = normName(m[2]);
-    if (/^(дат|врем|год|месяц|числ|день|сегодн|вчера|завтра|date|time)/.test(n) && autoToken(m[2], new Date()) === null && !out.includes(m[0])) out.push(m[0]);
+    if (/^(дат|врем|год|месяц|числ|день|сегодн|вчера|завтра|date|time|сьогодн|вчора|післязавтра|час(\s|$)|рік|місяц)/.test(n) && autoToken(m[2], new Date()) === null && !out.includes(m[0])) out.push(m[0]);
   } });
   return out;
 }
@@ -3563,7 +3577,7 @@ function substSheet() {
         h('li', {}, exBtn('{?Имя=Иван}'), ' — подставит «Иван», если не менять'),
         h('li', {}, exBtn('{?Статус|*В работе|Согласовано|Отклонено}'), ' — выбор из списка: до 6 вариантов кнопками, больше — выпадающим списком; «*» — выбран заранее; можно ввести и своё. Если поле одно, нажатие на вариант сразу копирует. Сама черта в варианте — «\\|»'),
         h('li', {}, 'одинаковое поле, повторённое в тексте, спрашивается один раз; последнее введённое значение запоминается')),
-      h('p', { class: 'msg', text: 'Любые другие скобки (например, в коде или JSON) остаются в тексте как есть. Допустимы также {сегодня}, {завтра}, {вчера}, {дата текстом}, {дата кратко}; регистр и «ё» не важны.' }),
+      h('p', { class: 'msg', text: 'Любые другие скобки (например, в коде или JSON) остаются в тексте как есть. Допустимы также {сегодня}, {завтра}, {вчера}, {дата текстом}, {дата кратко}; регистр и «ё» не важны.\nПо-украински (и результат тоже по-украински): {дата}, {дата+7}, {час}, {число}, {місяць}, {рік}, {день тижня}, {сьогодні}, {вчора}, {завтра}, {післязавтра}, {дата словами}, {дата коротко}.' }),
       h('div', { class: 'uilbl', text: 'Проверка' }),
       testIn, testOut,
       h('div', { class: 'btns', style: 'margin-top:10px' }, btn('Готово', () => api.close(), 'primary')));
