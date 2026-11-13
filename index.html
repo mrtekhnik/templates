@@ -499,7 +499,7 @@ body.cols-grid.grid-vert:not(.sortmode) .rowflow{display:grid;grid-auto-flow:col
 
 /* ---------- утилиты ---------- */
 const KEY = 'my-templates-v1';
-const APP_VERSION = '2026-11-13.2';
+const APP_VERSION = '2026-11-13.3';
 const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4);
 const $ = s => document.querySelector(s);
 
@@ -3406,6 +3406,10 @@ function normName(name) {
 }
 function autoToken(name, now) {
   const n = normName(name), p2 = x => String(x).padStart(2, '0');
+  const raw = name.replace(/[\u00a0\u2007\u202f]/g, ' ').trim();
+  // название с большой буквы → слово в результате тоже с большой; всё заглавными → весь результат заглавными
+  const cs = v => raw === raw.toUpperCase() && raw !== raw.toLowerCase() && raw.replace(/[^A-Za-zА-Яа-яІіЇїЄєҐґЁё]/g, '').length > 1 ? v.toUpperCase()
+    : raw[0] !== raw[0].toLowerCase() ? v.charAt(0).toUpperCase() + v.slice(1) : v;
   const shift = k => { const d = new Date(now); if (k) d.setDate(d.getDate() + k); return d; };
   const ddmmyyyy = d => p2(d.getDate()) + '.' + p2(d.getMonth() + 1) + '.' + d.getFullYear();
   let m = n.match(/^(?:дата|date)\s*(?:([+\-−–])\s*(\d{1,4}))?$/);
@@ -3425,13 +3429,13 @@ function autoToken(name, now) {
   if (n === 'дата коротко') return p2(now.getDate()) + '.' + p2(now.getMonth() + 1);
   if (n === 'час') return p2(now.getHours()) + ':' + p2(now.getMinutes());
   if (n === 'рік') return String(now.getFullYear());
-  if (n === 'місяць') return MONTHS_UK[now.getMonth()];
-  if (n === 'день тижня') return WEEKDAYS_UK[now.getDay()];
+  if (n === 'місяць') return cs(MONTHS_UK[now.getMonth()]);
+  if (n === 'день тижня') return cs(WEEKDAYS_UK[now.getDay()]);
   if (n === 'время' || n === 'time') return p2(now.getHours()) + ':' + p2(now.getMinutes());
   if (n === 'год') return String(now.getFullYear());
-  if (n === 'месяц') return MONTHS[now.getMonth()];
+  if (n === 'месяц') return cs(MONTHS[now.getMonth()]);
   if (n === 'число') return String(now.getDate());
-  if (n === 'день недели') return WEEKDAYS[now.getDay()];
+  if (n === 'день недели') return cs(WEEKDAYS[now.getDay()]);
   return null;
 }
 // фигурные скобки, которые похожи на попытку подстановки, но не распознаны (чтобы сообщить об опечатке)
